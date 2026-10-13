@@ -8,6 +8,9 @@ Currently supported:
 
 - **Scyrox** mice: DPI stages, polling rate, sensor options, buttons (incl. fire,
   combo, media keys, macros), profiles, sleep, pairing.
+- **Logitech** HID++ 2.0 mice (tested: PRO X Superlight via Lightspeed receiver):
+  battery, onboard/software mode, live DPI and polling rate, onboard profile
+  editing (DPI stages, polling rate, buttons, name, reset to factory).
 - **QMK/VIA** keyboards of any brand: keymap, layers, lighting menus, macros.
 - **Keychron** extensions on top of VIA: magnetic-switch (Hall-effect) actuation
   and rapid trigger, global and per key; snap tap; per-key RGB; sleep timers;
@@ -22,9 +25,11 @@ values that differ.
 |---|---|---|
 | [`scyrox`](crates/scyrox) | library | Scyrox mouse protocol (HID transport, flash map, encodings). No Periphery dependency. |
 | [`qmk-via`](crates/qmk-via) | library | QMK/VIA raw-HID protocol, keycodes, layout definitions, macros, menus, and Keychron extensions. No Periphery dependency. |
+| [`logitech-hidpp`](crates/logitech-hidpp) | library | Logitech HID++ 2.0: feature discovery, battery, DPI, report rate, onboard profiles (format + CRC). No Periphery dependency. |
 | [`periphery-core`](crates/periphery-core) | library | Brand-neutral model: `Device`/`Driver` traits, setting descriptors, keymaps, per-key properties, key-pair lists, backups. |
 | [`periphery-scyrox`](crates/periphery-scyrox) | adapter | Exposes `scyrox` through the core model. |
 | [`periphery-via`](crates/periphery-via) | adapter | Exposes `qmk-via` through the core model. |
+| [`periphery-logitech`](crates/periphery-logitech) | adapter | Exposes `logitech-hidpp` through the core model. |
 | [`periphery`](crates/app) | app | GUI (`periphery`) and CLI (`periphery-cli`). |
 
 The protocol crates can be used on their own:
@@ -37,6 +42,8 @@ println!("{:?}", mouse.read_settings()?);
 
 Adding a brand = a protocol crate + an adapter implementing
 `periphery_core::Driver` and `Device`, registered in `crates/app/src/lib.rs`.
+See **[docs/adding-a-device.md](docs/adding-a-device.md)** for the full guide
+and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution rules.
 
 ## Running
 
@@ -57,7 +64,8 @@ definition (pre-parsed `layouts.keys` format) there as `{vid}_{pid}.json`.
 
 ## Status
 
-Verified on a Scyrox 8K dongle + mouse and a Keychron K2 HE (firmware 1.2.1).
+Verified on a Scyrox 8K dongle + mouse, a Keychron K2 HE (firmware 1.2.1) and
+a Logitech PRO X Superlight.
 Not yet implemented: magnetic-switch calibration, DKS/toggle/turbo editing,
 HE profile rename, Keychron mice.
 
