@@ -1,0 +1,10 @@
+[package]
+name = "periphery-via"
+description = "Periphery driver adapter for QMK/VIA and Keychron keyboards"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+periphery-core = { path = "../periphery-core" }
+qmk-via = { path = "../qmk-via" }

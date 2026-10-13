@@ -1,0 +1,9 @@
+[package]
+name = "scyrox"
+description = "Protocol library for Scyrox mice (wire format recovered from the scyrox.net web driver)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+hidapi.workspace = true

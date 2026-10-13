@@ -1,0 +1,11 @@
+[package]
+name = "periphery-core"
+description = "Brand-neutral device model (settings, keymaps, per-key values) and backups for peripheral drivers"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+hidapi.workspace = true
+serde.workspace = true
+serde_json.workspace = true

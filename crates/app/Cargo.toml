@@ -1,0 +1,13 @@
+[package]
+name = "periphery"
+description = "One app to configure mice and keyboards from different brands"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+eframe = "0.29.1"
+periphery-core = { path = "../periphery-core" }
+periphery-scyrox = { path = "../periphery-scyrox" }
+periphery-via = { path = "../periphery-via" }
+rfd = "0.14.1"

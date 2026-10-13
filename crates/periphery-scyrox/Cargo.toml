@@ -1,0 +1,10 @@
+[package]
+name = "periphery-scyrox"
+description = "Periphery driver adapter for Scyrox mice"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+periphery-core = { path = "../periphery-core" }
+scyrox = { path = "../scyrox" }
