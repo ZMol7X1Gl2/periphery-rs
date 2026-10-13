@@ -89,6 +89,16 @@ impl LogitechMouse {
         }
     }
 
+    fn hz_kind(rates: &[u32]) -> Kind {
+        Kind::choice(rates.iter().map(|hz| (*hz as i64, format!("{hz} Hz"))))
+    }
+
+    /// Reads a profile sector; factory (ROM) copies carry no valid CRC.
+    fn load_profile(&mut self, info: &OnboardInfo, sector: u16) -> Result<Profile> {
+        let raw = self.dev.read_sector(sector, info.sector_size)?;
+        if sector & ROM_BASE != 0 { Profile::from_rom(raw, info.button_count) } else { Profile::parse(raw, info.button_count) }
+    }
+
     fn rate_kind(intervals: &[u8]) -> Kind {
         Kind::choice(intervals.iter().map(|ms| (*ms as i64, hz(*ms))))
     }
@@ -97,6 +107,9 @@ impl LogitechMouse {
     /// the mouse reload it when it's the active one.
     fn edit_profile(&mut self, edit: impl FnOnce(&mut Profile) -> Result<()>) -> Result<()> {
         let (Some(info), Some(sector)) = (self.onboard, self.edit_sector) else { bail!("no onboard profile loaded") };
+        if sector & ROM_BASE != 0 {
+            bail!("this is the mouse's factory profile, which is read-only; save a profile with G HUB once to create editable copies");
+        }
         let mut p = Profile::parse(self.dev.read_sector(sector, info.sector_size)?, info.button_count)?;
         edit(&mut p)?;
         let bytes = p.encode();
@@ -127,7 +140,7 @@ impl LogitechMouse {
         self.edit_sector = Some(sector);
         let mut names = Vec::new();
         for s in &enabled {
-            let p = Profile::parse(self.dev.read_sector(*s, info.sector_size)?, info.button_count)?;
+            let p = self.load_profile(&info, *s)?;
             names.push((*s as i64, format!("Profile {s}: {}", p.name())));
             if *s == sector {
                 self.profile = Some(p);
@@ -142,6 +155,19 @@ impl LogitechMouse {
         out.groups.push(g);
 
         let Some(p) = self.profile.clone() else { return Ok(()) };
+        if sector & ROM_BASE != 0 {
+            let mut g = Group::new("Factory profile (read-only)");
+            let info_row = |id: &str, label: &str, text: String| Setting::new(id, label, Kind::Info, Value::Text(text));
+            let dpis: Vec<String> = (0..DPI_STAGES).map(|i| p.dpi(i)).filter(|d| *d != 0).map(|d| d.to_string()).collect();
+            g.push(info_row("rom.dpi", "DPI stages", dpis.join(" / ")));
+            g.push(info_row("rom.default", "Default stage", format!("Stage {}", p.default_dpi_stage() + 1)));
+            g.push(
+                info_row("rom.note", "Editing", "Not available yet".into())
+                    .help("This mouse only has its factory profiles, which are read-only. Saving a profile once with G HUB creates editable copies."),
+            );
+            out.groups.push(g);
+            return Ok(());
+        }
         let mut g = Group::new(format!("Profile {sector}"));
         g.push(Setting::new("p.name", "Name", Kind::Text { max_len: NAME_LEN }, Value::Text(p.name())));
         if !intervals.is_empty() {
@@ -209,8 +235,10 @@ impl Device for LogitechMouse {
             let pct = b.percent.map_or("?".to_string(), |p| format!("{p}%"));
             out.status.push(("Battery".into(), format!("{pct}{state}")));
         }
-        let dpi = self.dev.dpi_info()?;
-        let intervals = self.dev.report_intervals()?.unwrap_or_default();
+        // A failing optional read shouldn't hide everything else (incl. mode).
+        let dpi = self.dev.dpi_info().unwrap_or(None);
+        let intervals = self.dev.report_intervals().unwrap_or(None).unwrap_or_default();
+        let rates = self.dev.report_rates().unwrap_or(None).unwrap_or_default();
         let mode = if self.onboard.is_some() { self.dev.mode()? } else { Mode::Host };
 
         if self.onboard.is_some() {
@@ -234,12 +262,16 @@ impl Device for LogitechMouse {
                         .help("Applies immediately but isn't stored on the mouse"),
                 );
             }
-            if !intervals.is_empty() {
-                g.push(Setting::new("live.rate", "Polling rate", Self::rate_kind(&intervals), Value::Int(self.dev.report_interval()? as i64)));
+            if !rates.is_empty() {
+                g.push(Setting::new("live.rate", "Polling rate", Self::hz_kind(&rates), Value::Int(self.dev.report_rate()? as i64)));
             }
-            if !g.settings.is_empty() {
-                out.groups.push(g);
+            if g.settings.is_empty() {
+                g.push(
+                    Setting::new("live.none", "Live controls", Kind::Info, Value::Text("not reported by this mouse".into()))
+                        .help("The mouse exposes neither DPI nor polling-rate features in software mode."),
+                );
             }
+            out.groups.push(g);
         }
         self.profile_groups(&mut out, dpi.as_ref(), &intervals, mode)?;
         Ok(out)
@@ -259,7 +291,7 @@ impl Device for LogitechMouse {
                 Ok(())
             }
             ("live", "dpi") => self.dev.set_dpi(value.int()? as u16),
-            ("live", "rate") => self.dev.set_report_interval(value.int()? as u8),
+            ("live", "rate") => self.dev.set_report_rate(value.int()? as u32),
             ("onboard", "profile") => {
                 let s = value.int()? as u16;
                 self.edit_sector = Some(s);

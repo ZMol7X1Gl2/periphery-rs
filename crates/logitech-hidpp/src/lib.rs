@@ -40,7 +40,9 @@ pub mod feature {
     pub const BATTERY_STATUS: u16 = 0x1000;
     pub const UNIFIED_BATTERY: u16 = 0x1004;
     pub const ADJUSTABLE_DPI: u16 = 0x2201;
+    pub const EXT_ADJUSTABLE_DPI: u16 = 0x2202;
     pub const REPORT_RATE: u16 = 0x8060;
+    pub const EXT_REPORT_RATE: u16 = 0x8061;
     pub const ONBOARD_PROFILES: u16 = 0x8100;
 }
 
@@ -207,6 +209,18 @@ impl Device {
         Ok(idx)
     }
 
+    /// Every feature the device reports: (index, id, type flags, version).
+    pub fn feature_list(&mut self) -> Result<Vec<(u8, u16, u8, u8)>> {
+        let Some(fs) = self.feature_index(feature::FEATURE_SET)? else { return Ok(Vec::new()) };
+        let count = self.call_index(fs, 0, &[])?[0];
+        let mut out = Vec::new();
+        for i in 0..=count {
+            let p = self.call_index(fs, 1, &[i])?;
+            out.push((i, u16::from_be_bytes([p[0], p[1]]), p[2], p[3]));
+        }
+        Ok(out)
+    }
+
     pub fn has(&mut self, id: u16) -> Result<bool> {
         Ok(self.feature_index(id)?.is_some())
     }
@@ -294,46 +308,95 @@ impl Device {
         Ok(None)
     }
 
-    // ------------------------------------------------------------ DPI (0x2201)
+    // ---------------------------------------- DPI (0x2201, extended 0x2202)
 
-    pub fn dpi_info(&mut self) -> Result<Option<DpiInfo>> {
-        if !self.has(feature::ADJUSTABLE_DPI)? {
-            return Ok(None);
-        }
-        let p = self.call(feature::ADJUSTABLE_DPI, 1, &[0])?;
-        // List of big-endian u16 after the sensor index; 0xE000|step marks a
-        // range between the neighbouring values; 0 ends the list.
-        let words: Vec<u16> =
-            p[1..].chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).take_while(|w| *w != 0).collect();
-        let mut info = DpiInfo { min: 0, max: 0, step: 0, values: Vec::new() };
-        if let [a, s, b, ..] = words[..] {
-            if s & 0xE000 == 0xE000 {
-                info.min = a;
-                info.step = s & 0x1FFF;
-                info.max = b;
-                return Ok(Some(info));
+    /// Expands a DPI list: u16 big-endian values, `0xE000 | step` meaning
+    /// "every `step` up to the next value", terminated by 0.
+    fn expand_dpi_list(words: &[u16]) -> Vec<u16> {
+        let mut out: Vec<u16> = Vec::new();
+        let mut i = 0;
+        while i < words.len() && words[i] != 0 {
+            let w = words[i];
+            if w >> 13 == 0b111 && i + 1 < words.len() {
+                let (step, last) = (w & 0x1FFF, words[i + 1]);
+                if let Some(&start) = out.last() {
+                    if step > 0 {
+                        out.extend((start + step..=last).step_by(step as usize));
+                    }
+                }
+                i += 2;
+            } else {
+                out.push(w);
+                i += 1;
             }
         }
-        info.values = words;
-        info.min = info.values.first().copied().unwrap_or(0);
-        info.max = info.values.last().copied().unwrap_or(0);
-        Ok(Some(info))
+        out
+    }
+
+    fn dpi_info_from(list: Vec<u16>) -> Option<DpiInfo> {
+        let (&min, &max) = (list.first()?, list.last()?);
+        let step = list.get(1).map_or(1, |s| s - min);
+        let even = list.windows(2).all(|w| w[1] - w[0] == step);
+        Some(if even && step > 0 {
+            DpiInfo { min, max, step, values: Vec::new() }
+        } else {
+            DpiInfo { min, max, step: 0, values: list }
+        })
+    }
+
+    pub fn dpi_info(&mut self) -> Result<Option<DpiInfo>> {
+        if self.has(feature::ADJUSTABLE_DPI)? {
+            let p = self.call(feature::ADJUSTABLE_DPI, 1, &[0])?;
+            let words: Vec<u16> = p[1..].chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+            return Ok(Self::dpi_info_from(Self::expand_dpi_list(&words)));
+        }
+        if self.has(feature::EXT_ADJUSTABLE_DPI)? {
+            // getSensorDpiRanges(sensor 0, direction X, page n): data from byte 3,
+            // continued over pages until the list ends with 0x0000.
+            let mut bytes = Vec::new();
+            for page in 0..16u8 {
+                let p = self.call(feature::EXT_ADJUSTABLE_DPI, 2, &[0, 0, page])?;
+                bytes.extend_from_slice(&p[3..]);
+                if bytes.ends_with(&[0, 0]) || bytes.chunks(2).any(|c| c == [0, 0]) {
+                    break;
+                }
+            }
+            let words: Vec<u16> = bytes.chunks(2).filter(|c| c.len() == 2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+            return Ok(Self::dpi_info_from(Self::expand_dpi_list(&words)));
+        }
+        Ok(None)
     }
 
     pub fn dpi(&mut self) -> Result<u16> {
-        let p = self.call(feature::ADJUSTABLE_DPI, 2, &[0])?;
-        Ok(u16::from_be_bytes([p[1], p[2]]))
+        if self.has(feature::ADJUSTABLE_DPI)? {
+            let p = self.call(feature::ADJUSTABLE_DPI, 2, &[0])?;
+            return Ok(u16::from_be_bytes([p[1], p[2]]));
+        }
+        // Extended: [sensor, x (0 = use default), default x, y, default y, lod]
+        let p = self.call(feature::EXT_ADJUSTABLE_DPI, 5, &[0])?;
+        let x = u16::from_be_bytes([p[1], p[2]]);
+        Ok(if x == 0 { u16::from_be_bytes([p[3], p[4]]) } else { x })
     }
 
     pub fn set_dpi(&mut self, dpi: u16) -> Result<()> {
         let [hi, lo] = dpi.to_be_bytes();
-        self.call(feature::ADJUSTABLE_DPI, 3, &[0, hi, lo])?;
+        if self.has(feature::ADJUSTABLE_DPI)? {
+            self.call(feature::ADJUSTABLE_DPI, 3, &[0, hi, lo])?;
+            return Ok(());
+        }
+        // Capabilities byte 2: bit 0 separate Y, bit 1 lift-off distance.
+        let caps = self.call(feature::EXT_ADJUSTABLE_DPI, 1, &[0])?[2];
+        let current = self.call(feature::EXT_ADJUSTABLE_DPI, 5, &[0])?;
+        let (yhi, ylo) = if caps & 1 != 0 { (hi, lo) } else { (0, 0) };
+        let lod = if caps & 2 != 0 { current[9] } else { 0 };
+        self.call(feature::EXT_ADJUSTABLE_DPI, 6, &[0, hi, lo, yhi, ylo, lod])?;
         Ok(())
     }
 
-    // ---------------------------------------------------- report rate (0x8060)
+    // ---------------------------------- report rate (0x8060, extended 0x8061)
 
-    /// Supported intervals in ms (1 = 1000 Hz).
+    /// Intervals in ms supported by the classic report-rate feature, which is
+    /// also the unit stored in onboard profiles. `None` without 0x8060.
     pub fn report_intervals(&mut self) -> Result<Option<Vec<u8>>> {
         if !self.has(feature::REPORT_RATE)? {
             return Ok(None);
@@ -342,12 +405,35 @@ impl Device {
         Ok(Some((0..8).filter(|b| mask >> b & 1 == 1).map(|b| b + 1).collect()))
     }
 
-    pub fn report_interval(&mut self) -> Result<u8> {
-        Ok(self.call(feature::REPORT_RATE, 1, &[])?[0])
+    /// Supported polling rates in Hz (either feature).
+    pub fn report_rates(&mut self) -> Result<Option<Vec<u32>>> {
+        if let Some(ms) = self.report_intervals()? {
+            return Ok(Some(ms.into_iter().map(|m| 1000 / m as u32).collect()));
+        }
+        if self.has(feature::EXT_REPORT_RATE)? {
+            // Bit i = 125 << i Hz (125 Hz … 8000 Hz).
+            let p = self.call(feature::EXT_REPORT_RATE, 1, &[])?;
+            let mask = u16::from_be_bytes([p[0], p[1]]);
+            return Ok(Some((0..7).filter(|i| mask >> i & 1 == 1).map(|i| 125u32 << i).collect()));
+        }
+        Ok(None)
     }
 
-    pub fn set_report_interval(&mut self, ms: u8) -> Result<()> {
-        self.call(feature::REPORT_RATE, 2, &[ms])?;
+    pub fn report_rate(&mut self) -> Result<u32> {
+        if self.has(feature::REPORT_RATE)? {
+            return Ok(1000 / self.call(feature::REPORT_RATE, 1, &[])?[0].max(1) as u32);
+        }
+        Ok(125u32 << self.call(feature::EXT_REPORT_RATE, 2, &[])?[0].min(6))
+    }
+
+    pub fn set_report_rate(&mut self, hz: u32) -> Result<()> {
+        if self.has(feature::REPORT_RATE)? {
+            let ms = (1000 / hz.max(1)).clamp(1, 255) as u8;
+            self.call(feature::REPORT_RATE, 2, &[ms])?;
+            return Ok(());
+        }
+        let Some(index) = (0..7u8).find(|i| 125u32 << i == hz) else { bail!("unsupported polling rate {hz} Hz") };
+        self.call(feature::EXT_REPORT_RATE, 3, &[index])?;
         Ok(())
     }
 
@@ -432,14 +518,43 @@ impl Device {
         Ok(())
     }
 
-    /// Profile sectors listed in the directory with their enabled flag.
+    /// Profile sectors listed in the directory with their enabled flag. When
+    /// no software has written profiles yet, the flash directory is empty and
+    /// the factory (read-only, `ROM_BASE | n`) profiles are listed instead.
     pub fn profile_directory(&mut self, info: &OnboardInfo) -> Result<Vec<(u16, bool)>> {
-        let dir = self.read_sector(DIRECTORY_SECTOR, info.sector_size)?;
+        let mut dir = self.read_sector(DIRECTORY_SECTOR, info.sector_size)?;
+        if dir[..4] == [0; 4] || dir[..4] == [0xFF; 4] {
+            dir = self.read_sector(ROM_BASE, info.sector_size)?;
+        }
         Ok(dir
             .chunks(4)
             .take(info.profile_count as usize)
             .take_while(|e| !(e[0] == 0xFF && e[1] == 0xFF))
             .map(|e| (u16::from_be_bytes([e[0], e[1]]), e[2] != 0))
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dpi_list_with_range() {
+        // PRO X Superlight: 100, step 50, 25600.
+        let list = Device::expand_dpi_list(&[100, 0xE032, 25600, 0]);
+        assert_eq!(list.len(), (25600 - 100) / 50 + 1);
+        let info = Device::dpi_info_from(list).unwrap();
+        assert_eq!((info.min, info.max, info.step), (100, 25600, 50));
+        assert!(info.values.is_empty());
+    }
+
+    #[test]
+    fn dpi_list_with_mixed_steps() {
+        // 100-1000 in 50s, then up to 2000 in 100s: kept as an explicit list.
+        let info = Device::dpi_info_from(Device::expand_dpi_list(&[100, 0xE032, 1000, 0xE064, 2000, 0])).unwrap();
+        assert_eq!((info.min, info.max), (100, 2000));
+        assert_eq!(info.values.len(), 19 + 10);
+        assert!(info.values.contains(&1900) && !info.values.contains(&1950));
     }
 }

@@ -13,11 +13,15 @@ const USAGE: &str = "usage:
   periphery-cli setkey <device> <layer> <row> <col> <keycode-hex>
   periphery-cli setprop <device> <property-id> <value|default> <row,col>...
   periphery-cli backup <device> <file.json>
-  periphery-cli restore <device> <file.json> [--dry-run]";
+  periphery-cli restore <device> <file.json> [--dry-run]
+  periphery-cli diag                                   (read-only protocol details for bug reports)";
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let api = HidApi::new()?;
+    if args.first().map(String::as_str) == Some("diag") {
+        return diag(&api);
+    }
     let (mut devices, errors) = discover_all(&api, &periphery::drivers());
     for e in &errors {
         eprintln!("warning: {e}");
@@ -200,4 +204,60 @@ fn print_snapshot(s: &Snapshot) {
             println!("  {:<24} {}", l.label, if pairs.is_empty() { "none".into() } else { pairs.join(", ") });
         }
     }
+}
+
+/// Read-only protocol details to paste into bug reports.
+fn diag(api: &HidApi) -> Result<()> {
+    println!("periphery {}", env!("CARGO_PKG_VERSION"));
+    for d in api.device_list() {
+        if matches!(d.vendor_id(), 0x046D | 0x3434 | 0x3554) {
+            println!(
+                "hid {:04x}:{:04x} if={} page={:04x} usage={:04x} {:?}",
+                d.vendor_id(), d.product_id(), d.interface_number(), d.usage_page(), d.usage(), d.product_string()
+            );
+        }
+    }
+    for dev in logitech_hidpp::discover(api) {
+        let mut dev = match dev {
+            Ok(d) => d,
+            Err(e) => {
+                println!("logitech: {e:#}");
+                continue;
+            }
+        };
+        println!("
+logitech index {:#04x} on {:04x}, HID++ {}.{}", dev.index, dev.product_id, dev.protocol.0, dev.protocol.1);
+        let show = |label: &str, r: anyhow::Result<String>| match r {
+            Ok(v) => println!("  {label:<14} {v}"),
+            Err(e) => println!("  {label:<14} ERROR {e:#}"),
+        };
+        show("name", dev.name());
+        show("firmware", dev.firmware().map(|f| format!("{f:?}")));
+        show("battery", dev.battery().map(|b| format!("{b:?}")));
+        show("dpi range", dev.dpi_info().map(|d| format!("{d:?}")));
+        show("dpi", dev.dpi().map(|d| d.to_string()));
+        show("rates (Hz)", dev.report_rates().map(|r| format!("{r:?}")));
+        show("rate (Hz)", dev.report_rate().map(|r| r.to_string()));
+        show("profile ms", dev.report_intervals().map(|r| format!("{r:?}")));
+        match dev.onboard_info() {
+            Ok(Some(info)) => {
+                show("onboard", Ok(format!("{info:?}")));
+                show("mode", dev.mode().map(|m| format!("{m:?}")));
+                show("current", dev.current_profile().map(|p| format!("{p:#06x}")));
+                show("directory", dev.profile_directory(&info).map(|d| format!("{d:x?}")));
+            }
+            Ok(None) => println!("  onboard        none"),
+            Err(e) => println!("  onboard        ERROR {e:#}"),
+        }
+        match dev.feature_list() {
+            Ok(list) => {
+                println!("  features:");
+                for (i, id, flags, ver) in list {
+                    println!("    [{i:2}] {id:#06x} flags={flags:#04x} v{ver}");
+                }
+            }
+            Err(e) => println!("  features       ERROR {e:#}"),
+        }
+    }
+    Ok(())
 }
