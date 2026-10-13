@@ -333,6 +333,11 @@ impl Device {
         out
     }
 
+    /// Big-endian u16 words from reply bytes, ignoring a trailing odd byte.
+    fn dpi_words(bytes: &[u8]) -> Vec<u16> {
+        bytes.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect()
+    }
+
     fn dpi_info_from(list: Vec<u16>) -> Option<DpiInfo> {
         let (&min, &max) = (list.first()?, list.last()?);
         let step = list.get(1).map_or(1, |s| s - min);
@@ -347,8 +352,7 @@ impl Device {
     pub fn dpi_info(&mut self) -> Result<Option<DpiInfo>> {
         if self.has(feature::ADJUSTABLE_DPI)? {
             let p = self.call(feature::ADJUSTABLE_DPI, 1, &[0])?;
-            let words: Vec<u16> = p[1..].chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
-            return Ok(Self::dpi_info_from(Self::expand_dpi_list(&words)));
+            return Ok(Self::dpi_info_from(Self::expand_dpi_list(&Self::dpi_words(&p[1..]))));
         }
         if self.has(feature::EXT_ADJUSTABLE_DPI)? {
             // getSensorDpiRanges(sensor 0, direction X, page n): data from byte 3,
@@ -361,8 +365,7 @@ impl Device {
                     break;
                 }
             }
-            let words: Vec<u16> = bytes.chunks(2).filter(|c| c.len() == 2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
-            return Ok(Self::dpi_info_from(Self::expand_dpi_list(&words)));
+            return Ok(Self::dpi_info_from(Self::expand_dpi_list(&Self::dpi_words(&bytes))));
         }
         Ok(None)
     }
@@ -538,6 +541,15 @@ impl Device {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dpi_reply_from_superlight() {
+        // getSensorDpiList reply params from a PRO X Superlight (16 bytes):
+        // sensor 0, then 100, 0xE032 (step 50), 25600, 0 … — 15 bytes of words.
+        let reply = [0x00, 0x00, 0x64, 0xe0, 0x32, 0x64, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let info = Device::dpi_info_from(Device::expand_dpi_list(&Device::dpi_words(&reply[1..]))).unwrap();
+        assert_eq!((info.min, info.max, info.step), (100, 25600, 50));
+    }
 
     #[test]
     fn dpi_list_with_range() {
