@@ -3,6 +3,8 @@ name = "periphery-via"
 description = "Periphery driver adapter for QMK/VIA and Keychron keyboards"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true

@@ -3,6 +3,8 @@ name = "periphery-core"
 description = "Brand-neutral device model (settings, keymaps, per-key values) and backups for peripheral drivers"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true

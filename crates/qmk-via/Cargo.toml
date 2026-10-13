@@ -3,6 +3,8 @@ name = "qmk-via"
 description = "QMK/VIA raw-HID keyboard protocol with Keychron extensions (Hall-effect, per-key RGB, misc settings)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true

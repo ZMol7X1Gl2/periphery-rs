@@ -60,3 +60,16 @@ definition (pre-parsed `layouts.keys` format) there as `{vid}_{pid}.json`.
 Verified on a Scyrox 8K dongle + mouse and a Keychron K2 HE (firmware 1.2.1).
 Not yet implemented: magnetic-switch calibration, DKS/toggle/turbo editing,
 HE profile rename, Keychron mice.
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this work, as defined in the Apache-2.0 license, shall be dual
+licensed as above, without any additional terms or conditions.
