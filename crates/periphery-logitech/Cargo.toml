@@ -1,0 +1,12 @@
+[package]
+name = "periphery-logitech"
+description = "Periphery driver adapter for Logitech HID++ 2.0 mice"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+logitech-hidpp = { path = "../logitech-hidpp" }
+periphery-core = { path = "../periphery-core" }

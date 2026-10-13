@@ -10,6 +10,7 @@ repository.workspace = true
 anyhow.workspace = true
 eframe = "0.29.1"
 periphery-core = { path = "../periphery-core" }
+periphery-logitech = { path = "../periphery-logitech" }
 periphery-scyrox = { path = "../periphery-scyrox" }
 periphery-via = { path = "../periphery-via" }
 rfd = "0.14.1"

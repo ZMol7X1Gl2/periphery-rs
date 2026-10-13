@@ -1793,6 +1793,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "logitech-hidpp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hidapi",
+]
+
+[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2363,6 +2371,7 @@ dependencies = [
  "anyhow",
  "eframe",
  "periphery-core",
+ "periphery-logitech",
  "periphery-scyrox",
  "periphery-via",
  "rfd",
@@ -2376,6 +2385,15 @@ dependencies = [
  "hidapi",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "periphery-logitech"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "logitech-hidpp",
+ "periphery-core",
 ]
 
 [[package]]

@@ -1,0 +1,11 @@
+[package]
+name = "logitech-hidpp"
+description = "Logitech HID++ 2.0 protocol: feature discovery, battery, DPI, report rate and onboard profiles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+hidapi.workspace = true
