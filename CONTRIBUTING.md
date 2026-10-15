@@ -31,7 +31,8 @@ cargo run --release --bin periphery-cli -- list
 - **Test with real bytes.** Encoders and decoders get unit tests built from
   data read off actual hardware.
 - **Say what's untested.** If you couldn't verify something on hardware,
-  write it in the PR and in the setting's help text.
+  write it in the PR and in the setting's help text, and mark it 🟡 in
+  [docs/hardware.md](docs/hardware.md). Tested something? Mark it ✅ there.
 - Match the surrounding code style and run `cargo fmt` on files you touch.
 
 ## Pull requests

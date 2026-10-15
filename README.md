@@ -8,7 +8,7 @@ Currently supported:
 
 - **Scyrox** mice: DPI stages, polling rate, sensor options, buttons (incl. fire,
   combo, media keys, macros), profiles, sleep, pairing.
-- **Logitech** HID++ 2.0 mice (tested: PRO X Superlight via Lightspeed receiver):
+- **Logitech** HID++ 2.0 mice (tested: PRO X Superlight and Superlight 2):
   battery, onboard/software mode, live DPI and polling rate, onboard profile
   editing (DPI stages, polling rate, buttons, name, reset to factory).
 - **Ajazz** mice on Rongyuan firmware (AJ179 PRO / APEX / MC PRO, AJ159 PRO /
@@ -22,6 +22,9 @@ Currently supported:
 
 Every device can be backed up to JSON and restored; restore writes only the
 values that differ.
+
+See **[docs/hardware.md](docs/hardware.md)** for which devices and features
+have been tested on real hardware.
 
 ## Crates
 
@@ -91,10 +94,8 @@ definition (pre-parsed `layouts.keys` format) there as `{vid}_{pid}.json`.
 
 ## Status
 
-Verified on a Scyrox 8K dongle + mouse, a Keychron K2 HE (firmware 1.2.1) and
-a Logitech PRO X Superlight.
-Not yet implemented: magnetic-switch calibration, DKS/toggle/turbo editing,
-HE profile rename, Keychron mice.
+Tested and untested devices and features are tracked in
+[docs/hardware.md](docs/hardware.md).
 
 ## License
 
