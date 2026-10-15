@@ -25,7 +25,7 @@ know it.
 | Logitech | PRO X Superlight 2 | Lightspeed receiver | ✅ | 🟡 | Software (live) mode confirmed working since 0.1.1-rc.2 |
 | Logitech | Other HID++ 2.0 mice | Receiver or USB | 🟡 | 🟡 | |
 | Ajazz | AJ179 PRO / APEX / MC PRO, AJ159 PRO / APEX | Wired (`3151:4026` …) or receiver | 🟡 | 🟡 | Protocol recovered from the qmk.top web driver |
-| ROCCAT | Kone Aimo Remastered / 16K (`1E7D:2E2C`) | USB | 🟡 | ❌ | Protocol from community projects; the report layout was confirmed on this model by them. Web: Chrome, Edge and Arc on Windows hide the settings interface (tested with a 16K) |
+| ROCCAT | Kone Aimo Remastered / 16K (`1E7D:2E2C`) | USB | ✅ | ❌ | Desktop on Windows: DPI and button remapping confirmed (0.3.0-rc.1). Web: Chrome, Edge and Arc on Windows hide the settings interface (tested with a 16K) |
 | ROCCAT | Kone Aimo (`1E7D:2E27`) | USB | 🟡 | ❌ | Assumed to share the Remastered's layout (libratbag PR #1883 treats them alike) |
 
 ## Features
@@ -102,9 +102,10 @@ product id. `periphery-cli diag` prints the raw replies.
 |---|---|
 | Onboard profiles (switch active profile) | 🟡 |
 | Polling rate | 🟡 |
-| DPI stages (X and Y set together), active stage | 🟡 |
-| Lighting: effect, speed, brightness, zone colours | 🟡 |
-| Buttons and Easy-Shift layer, keyboard shortcuts | 🟡 |
+| DPI stages (X and Y set together), active stage | ✅ (Kone Aimo 16K) |
+| Lighting: effect, speed, brightness, zone colours | 🟡 (0.3.0-rc.1 had no effect while a Swarm theme was active; the fix is not tested yet) |
+| Buttons and Easy-Shift layer | ✅ (Kone Aimo 16K) |
+| Keyboard shortcuts on buttons | 🟡 |
 | Backup / restore | 🟡 |
 | Macros | ❌ (shown as "Macro", kept as is) |
 | Sensitivity, angle snapping, live (non-saved) lighting | ❌ |

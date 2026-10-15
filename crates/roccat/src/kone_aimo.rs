@@ -278,6 +278,7 @@ impl Zone {
 /// | 34      | 1    | effect speed, see [`SPEEDS`]                       |
 /// | 35      | 1    | brightness, 0–255                                  |
 /// | 61      | 55   | 11 LED slots of `intensity R G B 00`: wheel, left strip ×4, right strip ×4, underglow ×2 |
+/// | 116     | 1    | lighting source: `80 + n` = Swarm theme n (the slots are ignored), `0n` = custom colours |
 /// | 124     | 2    | checksum: u16 LE sum of bytes 0–123                |
 ///
 /// Other bytes are kept as read.
@@ -397,6 +398,22 @@ impl Settings {
         for &o in zone.slots() {
             self.raw[o..o + 5].copy_from_slice(&[0xFF, rgb[0], rgb[1], rgb[2], 0x00]);
         }
+    }
+
+    /// The Swarm theme the mouse shows instead of the colour slots, if any.
+    pub fn theme(&self) -> Option<u8> {
+        let v = self.raw[116];
+        (v & 0x80 != 0).then_some(v & 0x7F)
+    }
+
+    /// Makes the mouse show this report's lighting instead of a Swarm
+    /// theme: `80 + n` (theme n) becomes `0n` (custom, based on theme n),
+    /// and a never-written `00` becomes `05`, as Swarm writes it.
+    pub fn use_custom_lighting(&mut self) {
+        self.raw[116] = match self.raw[116] {
+            0 => 0x05,
+            v => v & 0x7F,
+        };
     }
 }
 
@@ -544,6 +561,50 @@ mod tests {
         let mut s = Settings { raw };
         s.update_checksum();
         s
+    }
+
+    /// Profile 3 of a Kone Aimo 16K (`periphery-cli diag`), set up with ROCCAT
+    /// Swarm: Swarm theme 5, effect 9.
+    const KONE_AIMO_16K: &str = "06 7e 03 06 1f 01 08 00 10 00 18 00 20 00 40 00 08 00 10 00 18 00 20 00 40 00 \
+        03 00 00 08 ff 07 00 09 06 ff 1d 13 ff 00 ff 59 ff 00 00 ff fd fd 00 00 ff f4 64 00 00 ff f4 00 00 00 ff \
+        ff 20 20 20 00 ff 00 00 00 00 ff 00 00 00 00 ff 00 00 00 00 ff 00 00 00 00 ff 00 00 00 00 ff 00 00 00 00 \
+        ff 00 00 00 00 ff 00 00 00 00 ff 00 00 00 00 ff 00 00 00 00 85 01 00 00 00 00 00 00 8f 1b";
+
+    fn real() -> Settings {
+        let bytes: Vec<u8> = KONE_AIMO_16K.split_whitespace().map(|b| u8::from_str_radix(b, 16).unwrap()).collect();
+        Settings { raw: bytes.try_into().unwrap() }
+    }
+
+    #[test]
+    fn parses_real_kone_aimo_16k() {
+        let s = real();
+        assert!(s.checksum_ok());
+        assert_eq!(s.profile(), 3);
+        assert_eq!(s.stage(), 1);
+        assert_eq!((0..5).map(|i| s.dpi(i).0).collect::<Vec<_>>(), [400, 800, 1200, 1600, 3200]);
+        assert_eq!(s.report_rate(), Some(1000));
+        assert_eq!((s.effect(), s.speed(), s.brightness()), (9, 6, 255));
+        assert_eq!(s.color(Zone::Wheel), [0x20, 0x20, 0x20]);
+        assert_eq!(s.theme(), Some(5));
+    }
+
+    #[test]
+    fn custom_lighting_replaces_a_theme() {
+        let mut s = real();
+        s.set_color(Zone::Wheel, [0xFF, 0, 0]);
+        s.use_custom_lighting();
+        s.update_checksum();
+        assert_eq!(s.raw[116], 0x05);
+        assert_eq!(s.theme(), None);
+        assert!(s.checksum_ok());
+        // Apart from the checksum, only the colour slot and the source byte change.
+        let changed: Vec<usize> = (0..Settings::LEN - 2).filter(|&i| s.raw[i] != real().raw[i]).collect();
+        assert_eq!(changed, [62, 63, 64, 116]);
+        s.use_custom_lighting();
+        assert_eq!(s.raw[116], 0x05);
+        s.raw[116] = 0;
+        s.use_custom_lighting();
+        assert_eq!(s.raw[116], 0x05);
     }
 
     #[test]

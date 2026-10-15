@@ -179,6 +179,13 @@ impl Device for RoccatDevice {
         out.groups.push(g);
 
         let mut g = Group::new("Lighting");
+        if let Some(theme) = s.theme() {
+            g.push(
+                Setting::new("theme", "Source", Kind::Info, Value::Text(format!("ROCCAT Swarm theme {theme}")))
+                    .help("Changing any lighting setting below switches the mouse to these custom settings"),
+            );
+        }
+        let known_effect = EFFECTS.iter().any(|(e, _)| *e == s.effect());
         g.push(Setting::new(
             "effect",
             "Effect",
@@ -193,7 +200,11 @@ impl Device for RoccatDevice {
         ));
         g.push(Setting::new("brightness", "Brightness", Kind::range(0, 255), Value::Int(s.brightness() as i64)));
         for (i, z) in Zone::ALL.iter().enumerate() {
-            g.push(Setting::new(format!("color.{i}"), z.name(), Kind::Color, Value::Color(s.color(*z))));
+            let mut c = Setting::new(format!("color.{i}"), z.name(), Kind::Color, Value::Color(s.color(*z)));
+            if !known_effect {
+                c = c.help(format!("Effect {} may ignore these colours; choose Static to see them", s.effect()));
+            }
+            g.push(c);
         }
         out.groups.push(g);
 
@@ -289,6 +300,10 @@ impl Device for RoccatDevice {
                 }
                 if s == old {
                     return Ok(());
+                }
+                if matches!(name, "effect" | "speed" | "brightness" | "color") {
+                    // Otherwise a Swarm theme keeps overriding what we write.
+                    s.use_custom_lighting();
                 }
                 self.mouse.set_settings(&s).await
             }

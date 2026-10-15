@@ -10,6 +10,12 @@ release workflow turns Unreleased into the new version.
 
 ## [Unreleased]
 
+### Fixed
+
+- Changing a ROCCAT Kone Aimo's lighting had no effect while a ROCCAT Swarm
+  lighting theme was active on the mouse; it now switches the mouse to the
+  colours set in Periphery. The lighting section shows which theme is active.
+
 ## [0.3.0-rc.1] - 2026-10-15
 
 ### Added
