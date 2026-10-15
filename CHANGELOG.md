@@ -10,6 +10,8 @@ release workflow turns Unreleased into the new version.
 
 ## [Unreleased]
 
+## [0.3.0-rc.2] - 2026-10-15
+
 ### Fixed
 
 - Changing a ROCCAT Kone Aimo's lighting had no effect while a ROCCAT Swarm
@@ -90,7 +92,8 @@ release workflow turns Unreleased into the new version.
   Logitech HID++ 2.0 mice.
 - Backup and restore of every device to a JSON file.
 
-[Unreleased]: https://github.com/ZMol7X1Gl2/periphery-rs/compare/v0.3.0-rc.1...HEAD
+[Unreleased]: https://github.com/ZMol7X1Gl2/periphery-rs/compare/v0.3.0-rc.2...HEAD
+[0.3.0-rc.2]: https://github.com/ZMol7X1Gl2/periphery-rs/compare/v0.3.0-rc.1...v0.3.0-rc.2
 [0.3.0-rc.1]: https://github.com/ZMol7X1Gl2/periphery-rs/compare/v0.2.1...v0.3.0-rc.1
 [0.2.1]: https://github.com/ZMol7X1Gl2/periphery-rs/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ZMol7X1Gl2/periphery-rs/compare/v0.1.1-rc.2...v0.2.0
