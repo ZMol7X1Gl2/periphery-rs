@@ -1,21 +1,87 @@
 name: Release
 
-# Push a tag like `v0.1.0` to build and publish a release; tags with a
-# suffix such as `v0.1.1-rc.1` are published as pre-releases.
-# Running it manually builds the zip as a workflow artifact only.
+# Run it from the Actions tab (or `gh workflow run release.yml -f bump=patch`)
+# to release master: it picks the next version, turns the Unreleased section
+# of CHANGELOG.md into that version (it refuses when Unreleased is empty),
+# bumps Cargo.toml, commits, tags, builds the Windows zip and publishes a
+# GitHub release with that changelog section as its notes. Versions with a
+# suffix (0.3.0-rc.1) become pre-releases.
+#
+# Pushing a tag like `v0.3.0` by hand still builds and publishes that tag.
 on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to raise
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: Exact version instead (e.g. 0.3.0-rc.1); leave empty to use bump
+        type: string
+        required: false
   push:
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  prepare:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - name: Only from master
+        if: github.ref_name != 'master'
+        run: |
+          echo "Releases are made from master, not ${{ github.ref_name }}." >&2
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Version, changelog, commit and tag
+        id: release
+        env:
+          BUMP: ${{ inputs.bump }}
+          EXACT: ${{ inputs.version }}
+        run: |
+          version="$(bash .github/scripts/release.sh next-version "$BUMP" "$EXACT")"
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag already exists" >&2
+            exit 1
+          fi
+          bash .github/scripts/release.sh promote "$version"
+          sed -i "0,/^version = \".*\"$/s//version = \"$version\"/" Cargo.toml
+          cargo update --workspace
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "Release $version"
+          git tag -a "$tag" -m "Periphery $version"
+          git push origin HEAD:master "$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Tagged $tag" >> "$GITHUB_STEP_SUMMARY"
+
   windows:
+    needs: prepare
+    # Runs after prepare, or on its own for a pushed tag.
+    if: always() && (needs.prepare.result == 'success' || (needs.prepare.result == 'skipped' && github.ref_type == 'tag'))
     runs-on: windows-latest
+    env:
+      TAG: ${{ needs.prepare.outputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -28,10 +94,9 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME } else { "dev-$($env:GITHUB_SHA.Substring(0,7))" }
-          $name = "periphery-$version-windows-x64"
+          $name = "periphery-$env:TAG-windows-x64"
           New-Item -ItemType Directory -Path $name | Out-Null
-          Copy-Item target/release/periphery.exe, target/release/periphery-cli.exe, README.md, LICENSE-MIT, LICENSE-APACHE -Destination $name
+          Copy-Item target/release/periphery.exe, target/release/periphery-cli.exe, README.md, CHANGELOG.md, LICENSE-MIT, LICENSE-APACHE -Destination $name
           Compress-Archive -Path "$name/*" -DestinationPath "$name.zip"
           "ZIP=$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
@@ -42,12 +107,17 @@ jobs:
           path: ${{ env.ZIP }}
 
       - name: Publish GitHub release
-        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          # Tags with a suffix (v0.2.0-rc.1, v0.2.0-alpha) become pre-releases.
+          # Suffixed versions (v0.3.0-rc.1, v0.3.0-alpha) become pre-releases.
           pre=""
-          if [[ "${{ github.ref_name }}" == *-* ]]; then pre="--prerelease"; fi
-          gh release create "${{ github.ref_name }}" "${{ env.ZIP }}" --title "Periphery ${{ github.ref_name }}" --generate-notes $pre
+          if [[ "$TAG" == *-* ]]; then pre="--prerelease"; fi
+          bash .github/scripts/release.sh section "$TAG" > notes.md
+          if [[ -s notes.md ]]; then
+            notes=(--notes-file notes.md)
+          else
+            notes=(--generate-notes)
+          fi
+          gh release create "$TAG" "$ZIP" --title "Periphery $TAG" "${notes[@]}" $pre

@@ -48,6 +48,26 @@ Please include:
 
 CI builds and tests the workspace on Windows for every pull request.
 
+## Changelog and releases
+
+Describe user-visible changes in [CHANGELOG.md](CHANGELOG.md) under
+**Unreleased**, in the same pull request, using the section that fits
+(Added, Changed, Deprecated, Removed, Fixed, Security). Write for people
+using Periphery, not for developers: what changed for them, not how.
+Internal changes (refactors, CI, tests) need no entry.
+
+To release `master`, run the **Release** workflow from the Actions tab, or:
+
+```
+gh workflow run release.yml -f bump=patch            # or minor / major
+gh workflow run release.yml -f version=0.3.0-rc.1    # exact; suffix = pre-release
+```
+
+It turns Unreleased into the new version, bumps the version, commits,
+tags, builds the Windows zip and publishes the GitHub release with that
+changelog section as its notes. It refuses to run while Unreleased is
+empty.
+
 ## License
 
 By contributing, you agree that your contributions are dual-licensed under
