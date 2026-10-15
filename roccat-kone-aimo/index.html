@@ -7,8 +7,8 @@
   <meta name="description" content="Configure mice and keyboards from different brands in your browser.">
   
 <script type="module">
-import init, * as bindings from '/periphery-rs/roccat-kone-aimo/periphery-web-ad3ca2110607feb3.js';
-const wasm = await init({ module_or_path: '/periphery-rs/roccat-kone-aimo/periphery-web-ad3ca2110607feb3_bg.wasm' });
+import init, * as bindings from '/periphery-rs/roccat-kone-aimo/periphery-web-25226e4cce3edec7.js';
+const wasm = await init({ module_or_path: '/periphery-rs/roccat-kone-aimo/periphery-web-25226e4cce3edec7_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -23,7 +23,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
       font: 16px system-ui, sans-serif; padding: 16px; text-align: center; }
   </style>
-<link rel="modulepreload" href="/periphery-rs/roccat-kone-aimo/periphery-web-ad3ca2110607feb3.js" crossorigin="anonymous" integrity="sha384-JFBB/lR8mezkeD1mlUQphnvLYgfJ6ChPmmERStqv7y7kkDcdn+3p0kg9oT8x57Xs"><link rel="preload" href="/periphery-rs/roccat-kone-aimo/periphery-web-ad3ca2110607feb3_bg.wasm" crossorigin="anonymous" integrity="sha384-zQDRS4+Wg9v96oxEuI0PhVTOmyr6vCWbD25kxHGnthG3SThITspH3cStpUSv702F" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/periphery-rs/roccat-kone-aimo/periphery-web-25226e4cce3edec7.js" crossorigin="anonymous" integrity="sha384-ZJqrp7l4qhJDFIJyqAOYBDDvMsMnsWuHsgjRnHyv7knHYZ3xLRuwd77xmudmsByE"><link rel="preload" href="/periphery-rs/roccat-kone-aimo/periphery-web-25226e4cce3edec7_bg.wasm" crossorigin="anonymous" integrity="sha384-OUAcoELb+pSwGE06wO87BK+hTKNMQkaoiz3Arq1UzoMeG6s8oS50fufGott5Mqqn" as="fetch" type="application/wasm"></head>
 <body>
   <canvas id="periphery"></canvas>
   <div id="loading">Loading Periphery…</div>
