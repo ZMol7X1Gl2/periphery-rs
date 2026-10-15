@@ -15,6 +15,7 @@ Check these first — many devices need no new code:
 | Any **QMK/VIA keyboard** | It's detected automatically (usage page `0xFF60`). For the keymap view, put its VIA definition (pre-parsed `layouts.keys` format) into `%APPDATA%\periphery\definitions\{vid}_{pid}.json`. |
 | A **Keychron** keyboard | Detected and its layout is downloaded from Keychron automatically. |
 | A **Logitech** mouse with HID++ 2.0 | Detected automatically through its receiver or USB cable. Features it lacks are simply not shown. |
+| An **Ajazz** (or other Rongyuan-firmware) PAN1080 mouse | If `periphery-cli show` says its model id isn't in the list, add it to `MODELS` in `crates/rongyuan/src/models.rs` (values from the device list in the qmk.top/v4 web driver), and its USB ids to `MOUSE_PIDS` / `RECEIVERS` if it isn't found at all. |
 | Another **Scyrox** model | Add its USB product ids to `PRODUCT_IDS` in `crates/scyrox/src/protocol.rs`, and its sensor to `Sensor::from_mid` if new. |
 
 Run `periphery-cli list` to see what's detected. If your device shows up, you

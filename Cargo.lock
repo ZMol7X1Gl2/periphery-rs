@@ -2373,6 +2373,7 @@ dependencies = [
  "logitech-hidpp",
  "periphery-core",
  "periphery-logitech",
+ "periphery-rongyuan",
  "periphery-scyrox",
  "periphery-via",
  "rfd",
@@ -2395,6 +2396,15 @@ dependencies = [
  "anyhow",
  "logitech-hidpp",
  "periphery-core",
+]
+
+[[package]]
+name = "periphery-rongyuan"
+version = "0.1.1-rc.2"
+dependencies = [
+ "anyhow",
+ "periphery-core",
+ "rongyuan",
 ]
 
 [[package]]
@@ -2706,6 +2716,14 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rongyuan"
+version = "0.1.1-rc.2"
+dependencies = [
+ "anyhow",
+ "hidapi",
 ]
 
 [[package]]

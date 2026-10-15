@@ -1,0 +1,11 @@
+[package]
+name = "rongyuan"
+description = "Protocol library for Rongyuan-firmware mice such as the Ajazz AJ179 and AJ159 series (wire format recovered from the qmk.top web driver)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+hidapi.workspace = true
