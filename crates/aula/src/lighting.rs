@@ -55,6 +55,15 @@ impl LightingPage {
         &self.bytes
     }
 
+    /// Bytes that differ from `old`, as `offset: old -> new`.
+    pub fn diff(&self, old: &LightingPage) -> String {
+        let changes: Vec<String> = (0..PAGE_LEN)
+            .filter(|&i| self.bytes[i] != old.bytes[i])
+            .map(|i| format!("{i:#04x}: {:02x} -> {:02x}", old.bytes[i], self.bytes[i]))
+            .collect();
+        if changes.is_empty() { "no changes".into() } else { changes.join(", ") }
+    }
+
     pub fn effect(&self) -> u8 {
         self.bytes[EFFECT]
     }

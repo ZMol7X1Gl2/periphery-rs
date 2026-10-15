@@ -16,6 +16,8 @@ release workflow turns Unreleased into the new version.
   and colour, backlight sleep timer, and factory reset. The F87, F99 and H108
   share the protocol and are recognised too. Not yet tested on a real
   keyboard.
+- AULA: the web app's browser console (F12) shows what the driver found,
+  every change it writes and any problem talking to the keyboard.
 
 ### Changed
 

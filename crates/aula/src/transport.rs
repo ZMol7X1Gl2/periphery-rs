@@ -22,11 +22,15 @@
 //! The keyboard has several `0xFF00` collections; only one declares report 6.
 //! On Windows each is its own device path, so [`Keyboard::open`] tries them
 //! in turn.
+//!
+//! Everything is logged under the `aula` target (the browser console in the
+//! web app): problems as warnings, opened devices and changes as info.
 
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use hid_transport::{Api, DeviceInfo, sleep};
+use log::{info, warn};
 
 use crate::lighting::{LightingPage, PAGE_LEN};
 use crate::models::{self, FILTER, Model};
@@ -53,6 +57,17 @@ pub mod cmd {
 }
 
 /// One package of a transfer of `total` bytes.
+pub(crate) fn hex(b: &[u8]) -> String {
+    b.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ")
+}
+
+fn describe(d: &DeviceInfo) -> String {
+    format!(
+        "{:04x}:{:04x} page {:04x} usage {:04x} interface {} {:?}",
+        d.vendor_id, d.product_id, d.usage_page, d.usage, d.interface_number, d.product
+    )
+}
+
 pub fn frame(command: u8, parameter: u8, total: usize, index: usize, len: usize, payload: &[u8]) -> Vec<u8> {
     let mut buf = vec![0u8; REPORT_LEN];
     buf[0] = REPORT_ID;
@@ -81,6 +96,7 @@ impl Keyboard {
     pub async fn open_all(api: &Api) -> Vec<Result<Keyboard>> {
         let mut groups: Vec<(i32, Vec<&DeviceInfo>)> = Vec::new();
         for info in Self::candidates(api) {
+            info!(target: "aula", "candidate {}", describe(info));
             match groups.iter_mut().find(|(i, _)| *i == info.interface_number) {
                 Some((_, list)) => list.push(info),
                 None => groups.push((info.interface_number, vec![info])),
@@ -95,8 +111,15 @@ impl Keyboard {
                         last = Some(Ok(kb));
                         break;
                     }
-                    Err(e) => last = Some(Err(e)),
+                    Err(e) => {
+                        // Expected on Windows for the collections without report 6.
+                        info!(target: "aula", "{} did not answer: {e:#}", describe(info));
+                        last = Some(Err(e));
+                    }
                 }
+            }
+            if let Some(Err(e)) = &last {
+                warn!(target: "aula", "no collection of the keyboard answered; last error: {e:#}");
             }
             out.extend(last);
         }
@@ -108,6 +131,15 @@ impl Keyboard {
         let mut kb = Keyboard { dev, identity: [0; 6] };
         let id = kb.read(cmd::GET_INFO, cmd::INFO_IDENTITY, 6).await.context("reading the keyboard identity")?;
         kb.identity.copy_from_slice(&id);
+        match kb.model() {
+            Some(m) => info!(target: "aula", "opened AULA {} (identity {}) on {}", m.name, hex(&kb.identity), describe(info)),
+            None => warn!(
+                target: "aula",
+                "unknown AULA model, identity {} on {}; please report it with the keyboard's name",
+                hex(&kb.identity),
+                describe(info)
+            ),
+        }
         Ok(kb)
     }
 
@@ -117,10 +149,13 @@ impl Keyboard {
 
     async fn set_feature(&self, buf: &[u8]) -> Result<()> {
         let mut last = None;
-        for _ in 0..RETRIES {
+        for attempt in 1..=RETRIES {
             match self.dev.send_feature_report(buf).await {
                 Ok(()) => return Ok(()),
-                Err(e) => last = Some(e),
+                Err(e) => {
+                    warn!(target: "aula", "set feature report (header {}) failed, attempt {attempt}/{RETRIES}: {e:#}", hex(&buf[..HEADER]));
+                    last = Some(e);
+                }
             }
             sleep(RETRY_DELAY).await;
         }
@@ -137,8 +172,20 @@ impl Keyboard {
             sleep(DELAY).await;
             let mut reply = vec![0u8; REPORT_LEN];
             reply[0] = REPORT_ID;
-            let n = self.dev.get_feature_report(&mut reply).await.context("HID get feature report")?;
+            let n = match self.dev.get_feature_report(&mut reply).await {
+                Ok(n) => n,
+                Err(e) => {
+                    warn!(target: "aula", "get feature report for command {command:#04x} failed: {e:#}");
+                    return Err(e).context("HID get feature report");
+                }
+            };
             if n < HEADER + chunk || reply[1] != command {
+                warn!(
+                    target: "aula",
+                    "unexpected reply to command {command:#04x} ({n} bytes, wanted {}): {}",
+                    HEADER + chunk,
+                    hex(&reply[..n.min(HEADER + 16)])
+                );
                 bail!("unexpected reply to command {command:#04x}: {:02x?}", &reply[..n.min(HEADER)]);
             }
             out.extend_from_slice(&reply[HEADER..HEADER + chunk]);
@@ -156,21 +203,34 @@ impl Keyboard {
     }
 
     pub async fn lighting(&self) -> Result<LightingPage> {
-        LightingPage::new(self.read(cmd::GET_LIGHTING, 0, PAGE_LEN).await?)
+        let bytes = self.read(cmd::GET_LIGHTING, 0, PAGE_LEN).await?;
+        match LightingPage::new(bytes.clone()) {
+            Ok(page) => {
+                info!(target: "aula", "lighting page: effect {}, sleep {}", page.effect(), page.sleep());
+                Ok(page)
+            }
+            Err(e) => {
+                warn!(target: "aula", "{e:#}: {}", hex(&bytes));
+                Err(e)
+            }
+        }
     }
 
     /// Writes the page and checks that it reads back unchanged.
     pub async fn set_lighting(&self, page: &LightingPage) -> Result<()> {
         page.check()?;
+        info!(target: "aula", "writing lighting page: {}", page.diff(&self.lighting().await?));
         self.write(cmd::SET_LIGHTING, 0, page.bytes()).await?;
         let back = self.lighting().await?;
         if back.bytes() != page.bytes() {
+            warn!(target: "aula", "lighting page read back differently: {}", back.diff(page));
             bail!("the keyboard did not store the lighting change");
         }
         Ok(())
     }
 
     pub async fn factory_reset(&self) -> Result<()> {
+        info!(target: "aula", "factory reset");
         self.write(cmd::RESET, 0, &[1]).await
     }
 }

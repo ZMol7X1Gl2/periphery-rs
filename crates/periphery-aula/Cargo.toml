@@ -9,4 +9,5 @@ repository.workspace = true
 [dependencies]
 anyhow.workspace = true
 aula = { path = "../aula" }
+log = "0.4.34"
 periphery-core = { path = "../periphery-core" }

@@ -116,6 +116,25 @@ impl Device for AulaDevice {
     }
 
     async fn snapshot(&mut self) -> Result<Snapshot> {
+        let r = self.read_snapshot().await;
+        if let Err(e) = &r {
+            log::warn!(target: "aula", "reading the keyboard failed: {e:#}");
+        }
+        r
+    }
+
+    async fn set(&mut self, id: &str, value: &Value) -> Result<()> {
+        log::info!(target: "aula", "set {id} = {value:?}");
+        let r = self.apply(id, value).await;
+        if let Err(e) = &r {
+            log::warn!(target: "aula", "setting {id} to {value:?} failed: {e:#}");
+        }
+        r
+    }
+}
+
+impl AulaDevice {
+    async fn read_snapshot(&mut self) -> Result<Snapshot> {
         let mut out = Snapshot::default();
         out.status.push(("Connection".into(), "Wired".into()));
         out.status.push(("Identity".into(), hex(&self.kb.identity)));
@@ -153,7 +172,7 @@ impl Device for AulaDevice {
         Ok(out)
     }
 
-    async fn set(&mut self, id: &str, value: &Value) -> Result<()> {
+    async fn apply(&mut self, id: &str, value: &Value) -> Result<()> {
         let model = self.require_model()?;
         match id {
             "effect" => {

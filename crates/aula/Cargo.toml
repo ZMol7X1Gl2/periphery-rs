@@ -9,3 +9,4 @@ repository.workspace = true
 [dependencies]
 anyhow.workspace = true
 hid-transport.workspace = true
+log = "0.4.34"

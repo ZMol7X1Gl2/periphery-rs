@@ -445,6 +445,7 @@ version = "0.2.1"
 dependencies = [
  "anyhow",
  "hid-transport",
+ "log",
 ]
 
 [[package]]
@@ -2442,6 +2443,7 @@ version = "0.2.1"
 dependencies = [
  "anyhow",
  "aula",
+ "log",
  "periphery-core",
 ]
 

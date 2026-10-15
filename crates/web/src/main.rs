@@ -27,7 +27,8 @@ fn main() {
 
 #[cfg(target_arch = "wasm32")]
 fn log_level() -> log::LevelFilter {
-    log::LevelFilter::Warn
+    // Info so drivers can explain in the console what they found and changed.
+    log::LevelFilter::Info
 }
 
 #[cfg(not(target_arch = "wasm32"))]
