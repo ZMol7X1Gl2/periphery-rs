@@ -156,6 +156,11 @@ Guidelines:
 - **`filters`**: the vendor id / product ids / usage page of the interfaces
   you use. The browser only lets a page see devices the user picked, and its
   picker lists only devices matching some driver's filters.
+- **`claims`** (optional): whether your driver handles an interface even
+  when nothing could be opened (e.g. a receiver whose mouse sleeps).
+  Defaults to your filters; override it when your filters also match
+  devices you don't support, or they'd never be offered for a support
+  request.
 - **`discover`**: filter `api.devices()` by vendor id and usage page (a
   `Filter` has `matches`), open with `api.open(info).await`; return nothing
   when your hardware isn't present. Return `Err` only for a device that

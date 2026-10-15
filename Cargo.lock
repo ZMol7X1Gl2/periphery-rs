@@ -2423,6 +2423,8 @@ dependencies = [
  "periphery-via",
  "pollster",
  "rfd",
+ "serde_json",
+ "ureq",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

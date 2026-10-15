@@ -2,7 +2,7 @@
 //! crate): the Ajazz AJ179 and AJ159 series, wired or through their receiver.
 
 use anyhow::{Result, bail};
-use periphery_core::hid::{Api, Filter};
+use periphery_core::hid::{Api, DeviceInfo as HidInfo, Filter};
 use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Setting, Snapshot, Value, async_trait};
 use rongyuan::pan1080::{
     ACTIONS, BUTTONS, DEFAULT_COLORS, DEFAULT_DPIS, DpiStage, Options, REPORT_RATES, action_label,
@@ -19,6 +19,12 @@ impl Driver for RongyuanDriver {
 
     fn filters(&self) -> Vec<Filter> {
         vec![Mouse::FILTER]
+    }
+
+    /// Only known models: Akko, MonsGeek and other Rongyuan devices share
+    /// the filter but speak other command sets.
+    fn claims(&self, info: &HidInfo) -> bool {
+        Mouse::is_candidate(info)
     }
 
     async fn discover(&self, api: &Api) -> Vec<Result<Box<dyn Device>>> {

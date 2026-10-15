@@ -8,6 +8,7 @@ use std::time::Duration;
 use eframe::egui;
 use periphery_core::backup::{self, Backup};
 use periphery_core::hid::Api;
+use periphery_core::unknown::{UnknownDevice, unknown_devices};
 use periphery_core::{Device, DeviceInfo, KeyPair, Snapshot, Value, discover_all};
 
 /// How often the selected device is asked about on-device changes.
@@ -15,8 +16,9 @@ pub const POLL_CHANGES: Duration = Duration::from_millis(250);
 
 pub enum Req {
     Discover,
-    /// Ask the browser for access to more devices, then discover.
-    Request,
+    /// Ask the browser for access to more devices, then discover. `true`
+    /// lists every device in the picker, not only supported ones.
+    Request(bool),
     Select(usize),
     Refresh,
     Apply(usize, Vec<(String, Value)>),
@@ -31,7 +33,8 @@ pub enum Req {
 }
 
 pub enum Msg {
-    Devices(Vec<DeviceInfo>, Vec<String>),
+    /// Opened devices, discovery errors, devices no driver handles.
+    Devices(Vec<DeviceInfo>, Vec<String>, Vec<UnknownDevice>),
     Snapshot(usize, Box<Snapshot>),
     Error(String),
     Info(String),
@@ -41,6 +44,9 @@ pub enum Msg {
     RestoreFile { source: String, json: String },
     /// Dry-run result awaiting confirmation.
     RestorePlan { source: String, json: String, lines: Vec<String> },
+    /// Existing support request for an unknown device (by its id), sent by
+    /// the UI's lookup.
+    RequestLookup(String, Result<Option<crate::request::Existing>, String>),
     Done,
 }
 
@@ -71,35 +77,40 @@ impl Worker {
         self.send(msg);
     }
 
-    async fn discover(&mut self, request: bool) {
+    async fn discover(&mut self, request: Option<bool>) {
         self.devices.clear(); // release handles before reopening
         let api = match self.api.as_mut() {
             Some(api) => api.refresh().await,
             None => Api::new().await.map(|a| self.api = Some(a)),
         };
         if let Err(e) = api {
-            self.send(Msg::Devices(Vec::new(), vec![format!("HID: {e:#}")]));
+            self.send(Msg::Devices(Vec::new(), vec![format!("HID: {e:#}")], Vec::new()));
             return;
         }
         let api = self.api.as_mut().unwrap();
         let drivers = crate::drivers();
         let mut request_error = None;
-        if request {
-            if let Err(e) = api.request(&periphery_core::filters(&drivers)).await {
+        if let Some(any) = request {
+            let filters = if any { Vec::new() } else { periphery_core::filters(&drivers) };
+            if let Err(e) = api.request(&filters).await {
                 request_error = Some(format!("{e:#}"));
             }
         }
         let (devices, mut errors) = discover_all(api, &drivers).await;
         errors.extend(request_error);
         self.devices = devices;
-        let infos = self.devices.iter().map(|d| d.info().clone()).collect();
-        self.send(Msg::Devices(infos, errors));
+        let infos: Vec<DeviceInfo> = self.devices.iter().map(|d| d.info().clone()).collect();
+        let unknown = unknown_devices(api, &drivers)
+            .into_iter()
+            .filter(|u| crate::platform::LIST_ALL_UNKNOWN || u.is_configurable())
+            .collect();
+        self.send(Msg::Devices(infos, errors, unknown));
     }
 
     pub async fn handle(&mut self, req: Req) {
         match req {
-            Req::Discover => self.discover(false).await,
-            Req::Request => self.discover(true).await,
+            Req::Discover => self.discover(None).await,
+            Req::Request(any) => self.discover(Some(any)).await,
             Req::Select(i) => {
                 self.selected = Some(i);
                 self.snapshot(i).await;

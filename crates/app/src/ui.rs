@@ -7,9 +7,11 @@ use std::time::Duration;
 
 use eframe::egui::{self, Color32, RichText, Ui};
 use periphery_core::hid::Instant;
+use periphery_core::unknown::UnknownDevice;
 use periphery_core::{DeviceInfo, DeviceKind, KeyPair, KeyPairList, KeyProperty, Keymap, Kind, Setting, Snapshot, Value};
 
 use crate::platform::{self, ReqSender};
+use crate::request::{self, Existing};
 use crate::worker::{Msg, Req};
 
 const REFRESH_NOTICE: Duration = Duration::from_secs(3);
@@ -51,6 +53,10 @@ pub struct App {
     local: Sender<Msg>,
     devices: Vec<DeviceInfo>,
     discover_errors: Vec<String>,
+    /// Devices no driver handles, offered for a support request.
+    unknown: Vec<UnknownDevice>,
+    /// Support-request lookups by device id.
+    lookups: std::collections::HashMap<String, Lookup>,
     selected: Option<usize>,
     snap: Option<Snapshot>,
     error: Option<String>,
@@ -79,6 +85,13 @@ pub struct App {
     want_km: Option<String>,
 }
 
+/// State of a "Request support" lookup.
+enum Lookup {
+    Checking,
+    /// The existing request, if there is one.
+    Done(Option<Existing>),
+}
+
 #[derive(PartialEq, Clone, Copy)]
 enum Tab {
     Settings,
@@ -95,6 +108,8 @@ impl App {
             local,
             devices: Vec::new(),
             discover_errors: Vec::new(),
+            unknown: Vec::new(),
+            lookups: Default::default(),
             selected: None,
             snap: None,
             error: None,
@@ -149,7 +164,8 @@ impl App {
     fn poll(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
-                Msg::Devices(list, errors) => {
+                Msg::Devices(list, errors, unknown) => {
+                    self.unknown = unknown;
                     self.devices = list;
                     self.discover_errors = errors;
                     self.snap = None;
@@ -190,6 +206,10 @@ impl App {
                     }
                 }
                 Msg::RestorePlan { source, json, lines } => self.restore_plan = Some((source, json, lines)),
+                Msg::RequestLookup(id, result) => {
+                    // A failed lookup still lets the user open the form.
+                    self.lookups.insert(id, Lookup::Done(result.ok().flatten()));
+                }
                 Msg::Done => self.busy = self.busy.saturating_sub(1),
             }
         }
@@ -245,7 +265,12 @@ impl eframe::App for App {
             }
             ui.add_space(8.0);
             if platform::ASKS_FOR_DEVICES && ui.button("＋ Connect a device…").on_hover_text("Choose devices to give this page access to").clicked() {
-                self.send(Req::Request);
+                self.send(Req::Request(false));
+            }
+            if platform::ASKS_FOR_DEVICES
+                && ui.small_button("Connect another device…").on_hover_text("Pick a device Periphery doesn't support yet, to request support for it").clicked()
+            {
+                self.send(Req::Request(true));
             }
             if ui.button("⟳ Rescan").clicked() {
                 self.send(Req::Discover);
@@ -253,6 +278,7 @@ impl eframe::App for App {
             for e in &self.discover_errors {
                 ui.label(RichText::new(e).small().color(RED));
             }
+            self.unknown_list(ui);
         });
 
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
@@ -347,6 +373,49 @@ impl App {
                     self.error = None;
                 }
             });
+        }
+    }
+
+    /// Devices no driver handles, each with a way to ask for support.
+    fn unknown_list(&mut self, ui: &mut Ui) {
+        if self.unknown.is_empty() {
+            return;
+        }
+        ui.add_space(12.0);
+        ui.separator();
+        ui.label(RichText::new("Not supported yet").strong());
+        let mut lookup = None;
+        for d in &self.unknown {
+            ui.add_space(4.0);
+            ui.label(format!("🔌  {}", d.name())).on_hover_text(d.report());
+            ui.label(RichText::new(d.id()).small().weak());
+            let new_issue = request::new_issue_url(d, &platform::name());
+            match self.lookups.get(&d.id()) {
+                None => {
+                    if ui.small_button("Request support").on_hover_text("Ask for this device on GitHub (you review the request before it's sent)").clicked() {
+                        lookup = Some(d.clone());
+                    }
+                }
+                Some(Lookup::Checking) => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new("Checking existing requests…").small());
+                    });
+                }
+                Some(Lookup::Done(Some(e))) => {
+                    let state = if e.open { "open" } else { "closed" };
+                    ui.hyperlink_to(format!("Already requested: #{} ({state}) ↗", e.number), &e.url)
+                        .on_hover_text("Add a 👍 or details there");
+                    ui.hyperlink_to(RichText::new("New request anyway ↗").small(), new_issue);
+                }
+                Some(Lookup::Done(None)) => {
+                    ui.hyperlink_to("Open the request form ↗", new_issue).on_hover_text("Opens a prefilled GitHub issue; you can edit it before submitting");
+                }
+            }
+        }
+        if let Some(d) = lookup {
+            self.lookups.insert(d.id(), Lookup::Checking);
+            platform::lookup_request(&d, self.local.clone(), ui.ctx().clone());
         }
     }
 

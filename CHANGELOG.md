@@ -10,6 +10,15 @@ release workflow turns Unreleased into the new version.
 
 ## [Unreleased]
 
+### Added
+
+- Devices Periphery doesn't support yet are listed under "Not supported
+  yet", with a **Request support** button that checks for an existing
+  request and opens a prefilled GitHub issue you can review before sending.
+  `periphery-cli list` prints the same links.
+- Web app: **Connect another device…** lets you pick any device, so you can
+  request support for it.
+
 ## [0.3.0-rc.2] - 2026-10-15
 
 ### Fixed

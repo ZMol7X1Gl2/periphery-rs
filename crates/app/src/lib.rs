@@ -4,6 +4,7 @@
 use periphery_core::Driver;
 
 mod platform;
+pub mod request;
 pub mod ui;
 pub mod worker;
 

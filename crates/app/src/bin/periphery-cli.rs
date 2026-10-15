@@ -2,7 +2,9 @@
 
 use anyhow::{Context, Result, bail};
 use periphery_core::backup::{self, Backup};
+use periphery::request;
 use periphery_core::hid::Api;
+use periphery_core::unknown::unknown_devices;
 use periphery_core::{Device, Kind, Snapshot, Value, discover_all};
 
 const USAGE: &str = "usage:
@@ -45,6 +47,15 @@ async fn run() -> Result<()> {
             }
             if devices.is_empty() {
                 println!("no supported devices found");
+            }
+            let unknown: Vec<_> = unknown_devices(&api, &periphery::drivers()).into_iter().filter(|u| u.is_configurable()).collect();
+            if !unknown.is_empty() {
+                println!("
+not supported yet (request support with the link):");
+                for u in &unknown {
+                    println!("  {} {}
+    {}", u.id(), u.name(), request::new_issue_url(u, &format!("cli, {}", std::env::consts::OS)));
+                }
             }
         }
         Some("show") => {

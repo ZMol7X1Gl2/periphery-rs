@@ -271,12 +271,16 @@ impl Mouse {
     pub const FILTER: Filter =
         Filter { vendor_id: Some(models::VENDOR_ID), product_id: None, usage_page: Some(models::USAGE_PAGE), usage: Some(models::USAGE) };
 
-    /// The vendor collection of a supported wired mouse or receiver.
+    /// Whether `d` is the vendor collection of a supported wired mouse or
+    /// receiver (other Rongyuan devices share the filter).
+    pub fn is_candidate(d: &DeviceInfo) -> bool {
+        Self::FILTER.matches(d)
+            && (models::MOUSE_PIDS.contains(&d.product_id) || models::receiver_max_rate(d.product_id).is_some())
+    }
+
+    /// The vendor collection of every supported wired mouse or receiver.
     pub fn candidates(api: &Api) -> impl Iterator<Item = &DeviceInfo> {
-        api.devices().filter(|d| {
-            Self::FILTER.matches(d)
-                && (models::MOUSE_PIDS.contains(&d.product_id) || models::receiver_max_rate(d.product_id).is_some())
-        })
+        api.devices().filter(|d| Self::is_candidate(d))
     }
 
     /// Opens a candidate. Returns `None` for a receiver without a mouse.

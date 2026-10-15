@@ -7,6 +7,7 @@
 
 use anyhow::{Result, bail};
 pub mod backup;
+pub mod unknown;
 
 pub use async_trait::async_trait;
 pub use hid_transport as hid;
@@ -306,6 +307,14 @@ pub trait Driver: Sync {
     /// The HID interfaces this driver talks to. The browser only shows a page
     /// devices the user picked, and the picker lists only matching ones.
     fn filters(&self) -> Vec<Filter>;
+
+    /// Whether this driver handles the interface, even when nothing could be
+    /// opened right now (e.g. a receiver whose mouse sleeps). Devices no
+    /// driver claims are offered for a support request. Defaults to
+    /// [`Driver::filters`].
+    fn claims(&self, info: &hid::DeviceInfo) -> bool {
+        self.filters().iter().any(|f| f.matches(info))
+    }
 
     /// Opens every supported device in the current HID enumeration.
     async fn discover(&self, api: &Api) -> Vec<Result<Box<dyn Device>>>;

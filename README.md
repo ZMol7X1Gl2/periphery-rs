@@ -31,6 +31,10 @@ values that differ.
 See **[docs/hardware.md](docs/hardware.md)** for which devices and features
 have been tested on real hardware.
 
+Device not supported? Periphery lists it under "Not supported yet" with a
+**Request support** button that opens a prefilled
+[device request](https://github.com/ZMol7X1Gl2/periphery-rs/issues?q=label%3A%22device+request%22).
+
 ## Crates
 
 | Crate | Kind | Purpose |

@@ -1,0 +1,58 @@
+name: Device support request
+description: Ask for a mouse, keyboard or headset Periphery doesn't support yet
+title: "Support for <device> (<vid:pid>)"
+labels: ["device request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! Periphery's **Request support** button fills most of this in.
+        Before submitting, search the [existing requests](https://github.com/ZMol7X1Gl2/periphery-rs/issues?q=label%3A%22device+request%22) and add a 👍 there instead if your device is already listed.
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: Brand and model, as printed on the box
+      placeholder: Razer Viper V3 Pro
+    validations:
+      required: true
+  - type: input
+    id: ids
+    attributes:
+      label: USB id (VID:PID)
+      description: Shown in Periphery under "Not supported yet"
+      placeholder: 1532:00c0
+    validations:
+      required: true
+  - type: dropdown
+    id: connection
+    attributes:
+      label: How it connects
+      multiple: true
+      options:
+        - USB cable
+        - 2.4 GHz receiver
+        - Bluetooth
+  - type: input
+    id: vendor-software
+    attributes:
+      label: Vendor software
+      description: The brand's configuration app or web driver. A web driver link helps the most.
+      placeholder: https://hub.example.com or "Razer Synapse"
+  - type: textarea
+    id: wanted
+    attributes:
+      label: What you'd like to configure
+      placeholder: DPI stages, polling rate, buttons, lighting…
+  - type: textarea
+    id: details
+    attributes:
+      label: Device details
+      description: Filled in by Periphery; no serial numbers or personal data.
+      render: text
+  - type: checkboxes
+    id: testing
+    attributes:
+      label: Testing
+      options:
+        - label: I can test development versions with this device and report back

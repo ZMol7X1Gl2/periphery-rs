@@ -7,6 +7,9 @@ use std::sync::mpsc::Sender;
 use anyhow::Result;
 use eframe::egui;
 
+use periphery_core::unknown::UnknownDevice;
+
+use crate::request;
 use crate::worker::{Msg, Req};
 
 /// Sends a request to the worker.
@@ -28,6 +31,32 @@ mod native {
     /// The desktop sees every device; nothing to ask for.
     pub const ASKS_FOR_DEVICES: bool = false;
     pub const NO_DEVICES: &str = "No supported devices found.";
+    /// Every HID device shows up, so only list ones that look configurable.
+    pub const LIST_ALL_UNKNOWN: bool = false;
+
+    /// Where Periphery runs, for support requests.
+    pub fn name() -> String {
+        format!("desktop, {}", std::env::consts::OS)
+    }
+
+    /// Looks for an issue already asking for `d` and posts
+    /// [`Msg::RequestLookup`].
+    pub fn lookup_request(d: &UnknownDevice, msg: Sender<Msg>, ctx: egui::Context) {
+        let (id, url) = (d.id(), request::search_url(d));
+        thread::spawn(move || {
+            let result = ureq::get(&url)
+                .set("User-Agent", concat!("periphery/", env!("CARGO_PKG_VERSION")))
+                .set("Accept", "application/vnd.github+json")
+                .timeout(std::time::Duration::from_secs(10))
+                .call()
+                .map_err(anyhow::Error::from)
+                .and_then(|r| Ok(r.into_string()?))
+                .and_then(|text| request::parse_search(&text))
+                .map_err(|e| format!("{e:#}"));
+            let _ = msg.send(Msg::RequestLookup(id, result));
+            ctx.request_repaint();
+        });
+    }
 
     /// Runs the worker on its own thread; HID calls block there.
     pub fn spawn_worker(msg: Sender<Msg>, ctx: egui::Context) -> ReqSender {
@@ -86,6 +115,34 @@ mod web {
     /// Pages only see devices the user picked in the browser's dialog.
     pub const ASKS_FOR_DEVICES: bool = true;
     pub const NO_DEVICES: &str = "No devices connected yet. Use “Connect a device…” to pick one.";
+    /// The page only sees devices the user picked, so list every one.
+    pub const LIST_ALL_UNKNOWN: bool = true;
+
+    /// Where Periphery runs, for support requests.
+    pub fn name() -> String {
+        "web app".into()
+    }
+
+    /// Looks for an issue already asking for `d` and posts
+    /// [`Msg::RequestLookup`].
+    pub fn lookup_request(d: &UnknownDevice, msg: Sender<Msg>, ctx: egui::Context) {
+        let (id, url) = (d.id(), request::search_url(d));
+        spawn_local(async move {
+            let result = fetch_text(&url).await.and_then(|text| request::parse_search(&text)).map_err(|e| format!("{e:#}"));
+            let _ = msg.send(Msg::RequestLookup(id, result));
+            ctx.request_repaint();
+        });
+    }
+
+    async fn fetch_text(url: &str) -> Result<String> {
+        use wasm_bindgen_futures::JsFuture;
+
+        let err = |e: wasm_bindgen::JsValue| anyhow::anyhow!("{e:?}");
+        let window = web_sys::window().ok_or_else(|| anyhow::anyhow!("no browser window"))?;
+        let resp: web_sys::Response = JsFuture::from(window.fetch_with_str(url)).await.map_err(err)?.unchecked_into();
+        let text = JsFuture::from(resp.text().map_err(err)?).await.map_err(err)?;
+        text.as_string().ok_or_else(|| anyhow::anyhow!("empty reply"))
+    }
 
     /// Runs the worker as a task next to the UI.
     pub fn spawn_worker(msg: Sender<Msg>, ctx: egui::Context) -> ReqSender {
