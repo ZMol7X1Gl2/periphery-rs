@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Periphery</title>
+  <meta name="description" content="Configure mice and keyboards from different brands in your browser.">
+  
+<script type="module">
+import init, * as bindings from '/periphery-rs/aula-f75/periphery-web-88983b1ec96aa945.js';
+const wasm = await init({ module_or_path: '/periphery-rs/aula-f75/periphery-web-88983b1ec96aa945_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1b1b; color: #ddd; }
+    canvas { display: block; width: 100%; height: 100%; }
+    #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font: 16px system-ui, sans-serif; padding: 16px; text-align: center; }
+  </style>
+<link rel="modulepreload" href="/periphery-rs/aula-f75/periphery-web-88983b1ec96aa945.js" crossorigin="anonymous" integrity="sha384-lx9QRQb12tLj67DwZrY7QBxhPXG5qwVrXMr03R9UhCfwSUbr36gueapYNsDzjxkp"><link rel="preload" href="/periphery-rs/aula-f75/periphery-web-88983b1ec96aa945_bg.wasm" crossorigin="anonymous" integrity="sha384-lub5ViyqxkYvdEQxuxrh8FrQzstWSRZgotDIrp7R+twQFqgtfdBnamIlIMpA6EIv" as="fetch" type="application/wasm"></head>
+<body>
+  <canvas id="periphery"></canvas>
+  <div id="loading">Loading Periphery…</div>
+  <noscript>Periphery needs JavaScript and a Chromium-based browser (Chrome, Edge, Opera).</noscript>
+</body>
+</html>
