@@ -50,8 +50,8 @@ pub struct Features {
     pub bootloader_jump: bool,
 }
 
-fn features(raw: &Raw, version: u8, instruction_set: u8) -> Result<Features> {
-    let Some(r) = raw.try_query(&[KC_FEATURES])? else { return Ok(Features::default()) };
+async fn features(raw: &Raw, version: u8, instruction_set: u8) -> Result<Features> {
+    let Some(r) = raw.try_query(&[KC_FEATURES]).await? else { return Ok(Features::default()) };
     let bit = |v: u32, n: u32| v >> n & 1 == 1;
     Ok(if version >= 4 {
         let a = u16::from_le_bytes([r[3], r[4]]) as u32;
@@ -90,10 +90,10 @@ pub struct KeychronInfo {
     pub transport: Option<&'static str>,
 }
 
-pub fn info(raw: &Raw) -> Result<Option<KeychronInfo>> {
-    let Some(v) = raw.try_query(&[KC_PROTOCOL])? else { return Ok(None) };
-    let features = features(raw, v[1], v[3])?;
-    let firmware = raw.try_query(&[KC_FIRMWARE])?.map(|r| {
+pub async fn info(raw: &Raw) -> Result<Option<KeychronInfo>> {
+    let Some(v) = raw.try_query(&[KC_PROTOCOL]).await? else { return Ok(None) };
+    let features = features(raw, v[1], v[3]).await?;
+    let firmware = raw.try_query(&[KC_FIRMWARE]).await?.map(|r| {
         let end = r[1..].iter().position(|b| *b == 0).map_or(r.len(), |p| p + 1);
         String::from_utf8_lossy(&r[1..end]).trim().to_string()
     });
@@ -101,7 +101,7 @@ pub fn info(raw: &Raw) -> Result<Option<KeychronInfo>> {
     t[0] = KC_FACTORY;
     t[1] = 5;
     t[30] = 5;
-    let transport = raw.try_query(&t)?.and_then(|r| match r[2] {
+    let transport = raw.try_query(&t).await?.and_then(|r| match r[2] {
         1 => Some("USB"),
         2 => Some("Bluetooth"),
         4 => Some("2.4 GHz"),
@@ -119,8 +119,8 @@ pub struct Sleep {
     pub magnet_scan: u16,
 }
 
-pub fn sleep_get(raw: &Raw) -> Result<Option<Sleep>> {
-    Ok(raw.try_query(&[KC_MISC, misc::SLEEP_GET])?.and_then(|r| {
+pub async fn sleep_get(raw: &Raw) -> Result<Option<Sleep>> {
+    Ok(raw.try_query(&[KC_MISC, misc::SLEEP_GET]).await?.and_then(|r| {
         let s = Sleep {
             backlight: u16::from_le_bytes([r[3], r[4]]),
             sleep: u16::from_le_bytes([r[5], r[6]]),
@@ -130,11 +130,11 @@ pub fn sleep_get(raw: &Raw) -> Result<Option<Sleep>> {
     }))
 }
 
-pub fn sleep_set(raw: &Raw, s: Sleep) -> Result<()> {
+pub async fn sleep_set(raw: &Raw, s: Sleep) -> Result<()> {
     let [b0, b1] = s.backlight.to_le_bytes();
     let [s0, s1] = s.sleep.to_le_bytes();
     let [m0, m1] = s.magnet_scan.to_le_bytes();
-    let r = raw.query(&[KC_MISC, misc::SLEEP_SET, b0, b1, s0, s1, m0, m1])?;
+    let r = raw.query(&[KC_MISC, misc::SLEEP_SET, b0, b1, s0, s1, m0, m1]).await?;
     if r[2] != 0 {
         bail!("keyboard rejected the sleep settings");
     }
@@ -149,8 +149,8 @@ pub enum Debounce {
     Telink { press: u8, release: u8 },
 }
 
-pub fn debounce_get(raw: &Raw) -> Result<Option<Debounce>> {
-    let Some(r) = raw.try_query(&[KC_MISC, misc::DEBOUNCE_GET, 255])? else { return Ok(None) };
+pub async fn debounce_get(raw: &Raw) -> Result<Option<Debounce>> {
+    let Some(r) = raw.try_query(&[KC_MISC, misc::DEBOUNCE_GET, 255]).await? else { return Ok(None) };
     if r[2] == 255 {
         return Ok(None);
     }
@@ -161,20 +161,20 @@ pub fn debounce_get(raw: &Raw) -> Result<Option<Debounce>> {
     })
 }
 
-pub fn debounce_set(raw: &Raw, d: Debounce) -> Result<()> {
+pub async fn debounce_set(raw: &Raw, d: Debounce) -> Result<()> {
     let (a, b) = match d {
         Debounce::Qmk { mode, ms } => (mode, ms),
         Debounce::Telink { press, release } => (press, release),
     };
-    raw.try_query(&[KC_MISC, misc::DEBOUNCE_SET, a, b])?;
+    raw.try_query(&[KC_MISC, misc::DEBOUNCE_SET, a, b]).await?;
     Ok(())
 }
 
 pub const POLL_RATES: [u32; 7] = [8000, 4000, 2000, 1000, 500, 250, 125];
 
 /// (current rate, supported rates). Rate = 8000 >> index.
-pub fn poll_get(raw: &Raw) -> Result<Option<(u32, Vec<u32>)>> {
-    Ok(raw.try_query(&[KC_MISC, misc::POLL_GET])?.map(|r| {
+pub async fn poll_get(raw: &Raw) -> Result<Option<(u32, Vec<u32>)>> {
+    Ok(raw.try_query(&[KC_MISC, misc::POLL_GET]).await?.map(|r| {
         let supported = if r[4] == 0 {
             POLL_RATES.to_vec()
         } else {
@@ -184,19 +184,19 @@ pub fn poll_get(raw: &Raw) -> Result<Option<(u32, Vec<u32>)>> {
     }))
 }
 
-pub fn poll_set(raw: &Raw, hz: u32) -> Result<()> {
+pub async fn poll_set(raw: &Raw, hz: u32) -> Result<()> {
     let Some(index) = POLL_RATES.iter().position(|r| *r == hz) else { bail!("unsupported rate {hz}") };
-    raw.try_query(&[KC_MISC, misc::POLL_SET, index as u8])?;
+    raw.try_query(&[KC_MISC, misc::POLL_SET, index as u8]).await?;
     Ok(())
 }
 
 /// (command version, mode 0 battery saver / 1 normal / 2 high performance)
-pub fn perf_get(raw: &Raw) -> Result<Option<(u8, u8)>> {
-    Ok(raw.try_query(&[KC_MISC, misc::PERF_GET])?.map(|r| (r[3], r[4])))
+pub async fn perf_get(raw: &Raw) -> Result<Option<(u8, u8)>> {
+    Ok(raw.try_query(&[KC_MISC, misc::PERF_GET]).await?.map(|r| (r[3], r[4])))
 }
 
-pub fn perf_set(raw: &Raw, version: u8, mode: u8) -> Result<()> {
-    raw.try_query(&[KC_MISC, misc::PERF_SET, version, mode])?;
+pub async fn perf_set(raw: &Raw, version: u8, mode: u8) -> Result<()> {
+    raw.try_query(&[KC_MISC, misc::PERF_SET, version, mode]).await?;
     Ok(())
 }
 
@@ -208,8 +208,8 @@ pub struct Nkro {
 
 /// Only call when the board has no performance mode: on those boards misc
 /// sub-command 18 means "set performance" instead of "get NKRO".
-pub fn nkro_get(raw: &Raw, kc_version: u8) -> Result<Option<Nkro>> {
-    Ok(raw.try_query(&[KC_MISC, misc::NKRO_GET])?.map(|r| {
+pub async fn nkro_get(raw: &Raw, kc_version: u8) -> Result<Option<Nkro>> {
+    Ok(raw.try_query(&[KC_MISC, misc::NKRO_GET]).await?.map(|r| {
         let b = r[3];
         if kc_version >= 4 {
             let auto = b & 2 != 0;
@@ -220,18 +220,18 @@ pub fn nkro_get(raw: &Raw, kc_version: u8) -> Result<Option<Nkro>> {
     }))
 }
 
-pub fn nkro_set(raw: &Raw, on: bool) -> Result<()> {
-    raw.try_query(&[KC_MISC, misc::NKRO_SET, on as u8])?;
+pub async fn nkro_set(raw: &Raw, on: bool) -> Result<()> {
+    raw.try_query(&[KC_MISC, misc::NKRO_SET, on as u8]).await?;
     Ok(())
 }
 
 /// DIP switch function: 1 polling rate, 2 profile.
-pub fn dip_get(raw: &Raw) -> Result<Option<u8>> {
-    Ok(raw.try_query(&[KC_MISC, misc::DIP_GET])?.map(|r| r[5]))
+pub async fn dip_get(raw: &Raw) -> Result<Option<u8>> {
+    Ok(raw.try_query(&[KC_MISC, misc::DIP_GET]).await?.map(|r| r[5]))
 }
 
-pub fn dip_set(raw: &Raw, func: u8) -> Result<()> {
-    raw.try_query(&[KC_MISC, misc::DIP_SET, func])?;
+pub async fn dip_set(raw: &Raw, func: u8) -> Result<()> {
+    raw.try_query(&[KC_MISC, misc::DIP_SET, func]).await?;
     Ok(())
 }
 
@@ -279,27 +279,27 @@ pub struct HeState {
 
 const PROFILE_NAMES: [&str; 3] = ["Default", "Gaming", "Gamepad"];
 
-fn read_buffer(raw: &Raw, profile: u8, offset: u16, len: u8) -> Result<Vec<u8>> {
+async fn read_buffer(raw: &Raw, profile: u8, offset: u16, len: u8) -> Result<Vec<u8>> {
     let [lo, hi] = offset.to_le_bytes();
-    let r = raw.query(&[KC_HE, amc::GET_PROFILE_BUFFER, profile, lo, hi, len])?;
+    let r = raw.query(&[KC_HE, amc::GET_PROFILE_BUFFER, profile, lo, hi, len]).await?;
     if r[3] != lo || r[4] != hi {
         bail!("profile buffer reply for the wrong offset");
     }
     Ok(r[6..6 + (len as usize).min(26)].to_vec())
 }
 
-pub fn he_read(raw: &Raw) -> Result<Option<HeState>> {
-    let Some(v) = raw.try_query(&[KC_HE, amc::GET_VERSION])? else { return Ok(None) };
+pub async fn he_read(raw: &Raw) -> Result<Option<HeState>> {
+    let Some(v) = raw.try_query(&[KC_HE, amc::GET_VERSION]).await? else { return Ok(None) };
     let version = v[2];
     if version != 4 {
         // Other generations shift the profile buffer; not decoded yet.
         return Ok(Some(HeState { version, current: 0, size: 0, names: Vec::new(), global: Travel::decode([0; 4]) }));
     }
-    let p = raw.query(&[KC_HE, amc::GET_PROFILES_INFO])?;
+    let p = raw.query(&[KC_HE, amc::GET_PROFILES_INFO]).await?;
     let (current, total, size) = (p[2], p[3], u16::from_le_bytes([p[4], p[5]]));
     let mut names = Vec::new();
     for i in 0..total {
-        let b = read_buffer(raw, i, size.saturating_sub(32), 26)?;
+        let b = read_buffer(raw, i, size.saturating_sub(32), 26).await?;
         let name: String = b
             .chunks(2)
             .map(|c| u16::from_be_bytes([c[0], c[1]]))
@@ -309,30 +309,30 @@ pub fn he_read(raw: &Raw) -> Result<Option<HeState>> {
         let fallback = PROFILE_NAMES.get(i as usize).copied().unwrap_or("Profile");
         names.push(if name.trim().is_empty() { fallback.to_string() } else { name });
     }
-    let g = read_buffer(raw, current, 0, 4)?;
+    let g = read_buffer(raw, current, 0, 4).await?;
     let global = Travel::decode([g[0], g[1], g[2], g[3]]);
     Ok(Some(HeState { version, current, size, names, global }))
 }
 
 /// Applies travel settings to every key of `profile` and saves the profile.
-pub fn he_set_global(raw: &Raw, profile: u8, t: Travel) -> Result<()> {
+pub async fn he_set_global(raw: &Raw, profile: u8, t: Travel) -> Result<()> {
     if !(HE_MIN..=HE_MAX).contains(&t.actuation) {
         bail!("actuation must be 0.2-3.8 mm");
     }
     // keyMode 1 = all keys (0 would take a per-key bitmap).
-    let r = raw.query(&[KC_HE, amc::SET_TRAVEL, profile, t.mode, t.actuation, t.rt_press, t.rt_release, 1])?;
+    let r = raw.query(&[KC_HE, amc::SET_TRAVEL, profile, t.mode, t.actuation, t.rt_press, t.rt_release, 1]).await?;
     if r[2] != 0 {
         bail!("keyboard rejected the travel settings");
     }
-    let r = raw.query(&[KC_HE, amc::SAVE_PROFILE_BUFFER, profile])?;
+    let r = raw.query(&[KC_HE, amc::SAVE_PROFILE_BUFFER, profile]).await?;
     if r[2] != 0 {
         bail!("keyboard failed to save the profile");
     }
     Ok(())
 }
 
-pub fn he_select_profile(raw: &Raw, profile: u8) -> Result<()> {
-    raw.query(&[KC_HE, amc::SELECT_PROFILE, profile])?;
+pub async fn he_select_profile(raw: &Raw, profile: u8) -> Result<()> {
+    raw.query(&[KC_HE, amc::SELECT_PROFILE, profile]).await?;
     Ok(())
 }
 
@@ -398,11 +398,11 @@ const DKS_LEN: usize = 19;
 const SNAP_COUNT: usize = 20;
 
 /// Reads and decodes the whole buffer of `profile` (layout of HE version 4).
-pub fn he_read_profile(raw: &Raw, he: &HeState, rows: u8, cols: u8) -> Result<HeProfile> {
+pub async fn he_read_profile(raw: &Raw, he: &HeState, rows: u8, cols: u8) -> Result<HeProfile> {
     let mut buf = Vec::with_capacity(he.size as usize);
     while buf.len() < he.size as usize {
         let n = (he.size as usize - buf.len()).min(26) as u8;
-        buf.extend(read_buffer(raw, he.current, buf.len() as u16, n)?);
+        buf.extend(read_buffer(raw, he.current, buf.len() as u16, n).await?);
     }
     let n_keys = rows as usize * cols as usize;
     let keys_end = 4 + 4 * n_keys;
@@ -423,7 +423,7 @@ pub fn he_read_profile(raw: &Raw, he: &HeState, rows: u8, cols: u8) -> Result<He
 }
 
 /// Sets travel for specific keys (bitmap of 3 bytes per row) and saves.
-pub fn he_set_keys(raw: &Raw, profile: u8, keys: &[(u8, u8)], t: Travel) -> Result<()> {
+pub async fn he_set_keys(raw: &Raw, profile: u8, keys: &[(u8, u8)], t: Travel) -> Result<()> {
     if !(HE_MIN..=HE_MAX).contains(&t.actuation) {
         bail!("actuation must be 0.2-3.8 mm");
     }
@@ -436,15 +436,15 @@ pub fn he_set_keys(raw: &Raw, profile: u8, keys: &[(u8, u8)], t: Travel) -> Resu
         }
         req[8 + byte] |= 1 << (col % 8);
     }
-    let r = raw.query(&req)?;
+    let r = raw.query(&req).await?;
     if r[2] != 0 {
         bail!("keyboard rejected the per-key travel settings");
     }
-    he_save(raw, profile)
+    he_save(raw, profile).await
 }
 
-pub fn he_save(raw: &Raw, profile: u8) -> Result<()> {
-    let r = raw.query(&[KC_HE, amc::SAVE_PROFILE_BUFFER, profile])?;
+pub async fn he_save(raw: &Raw, profile: u8) -> Result<()> {
+    let r = raw.query(&[KC_HE, amc::SAVE_PROFILE_BUFFER, profile]).await?;
     if r[2] != 0 {
         bail!("keyboard failed to save the profile");
     }
@@ -452,8 +452,8 @@ pub fn he_save(raw: &Raw, profile: u8) -> Result<()> {
 }
 
 /// Writes one snap-tap slot; mode 0 with zero keys clears it.
-pub fn he_set_snap(raw: &Raw, profile: u8, slot: u8, a: (u8, u8), b: (u8, u8), mode: u8) -> Result<()> {
-    let r = raw.query(&[KC_HE, amc::SET_ACT_ON_AXIS, profile, a.0, a.1, b.0, b.1, slot, mode])?;
+pub async fn he_set_snap(raw: &Raw, profile: u8, slot: u8, a: (u8, u8), b: (u8, u8), mode: u8) -> Result<()> {
+    let r = raw.query(&[KC_HE, amc::SET_ACT_ON_AXIS, profile, a.0, a.1, b.0, b.1, slot, mode]).await?;
     if r[2] != 0 {
         bail!("keyboard rejected the snap tap setting");
     }
@@ -472,43 +472,43 @@ mod rgb {
 }
 
 /// Matrix position → LED index (`None` for keys without an LED).
-pub fn led_map(raw: &Raw, rows: u8, cols: u8) -> Result<Vec<Option<u8>>> {
+pub async fn led_map(raw: &Raw, rows: u8, cols: u8) -> Result<Vec<Option<u8>>> {
     let mut map = Vec::with_capacity(rows as usize * cols as usize);
     for row in 0..rows {
-        let r = raw.query(&[KC_RGB, rgb::LED_NUMBER, row, 255, 255, 255])?;
+        let r = raw.query(&[KC_RGB, rgb::LED_NUMBER, row, 255, 255, 255]).await?;
         map.extend(r[3..3 + cols as usize].iter().map(|b| (*b != 255).then_some(*b)));
     }
     Ok(map)
 }
 
 /// HSV colour of every LED, `count` LEDs.
-pub fn led_colors(raw: &Raw, count: u8) -> Result<Vec<[u8; 3]>> {
+pub async fn led_colors(raw: &Raw, count: u8) -> Result<Vec<[u8; 3]>> {
     let mut out = Vec::with_capacity(count as usize);
     while out.len() < count as usize {
         let n = (count as usize - out.len()).min(9) as u8;
-        let r = raw.query(&[KC_RGB, rgb::GET_COLOR, out.len() as u8, n])?;
+        let r = raw.query(&[KC_RGB, rgb::GET_COLOR, out.len() as u8, n]).await?;
         out.extend(r[3..3 + 3 * n as usize].chunks(3).map(|c| [c[0], c[1], c[2]]));
     }
     Ok(out)
 }
 
 /// Sets consecutive LEDs from `start` (HSV); call [`led_save`] afterwards.
-pub fn led_set(raw: &Raw, start: u8, hsv: &[[u8; 3]]) -> Result<()> {
+pub async fn led_set(raw: &Raw, start: u8, hsv: &[[u8; 3]]) -> Result<()> {
     for (i, chunk) in hsv.chunks(9).enumerate() {
         let mut req = vec![KC_RGB, rgb::SET_COLOR, start + (i * 9) as u8, chunk.len() as u8];
         req.extend(chunk.iter().flatten());
-        raw.query(&req)?;
+        raw.query(&req).await?;
     }
     Ok(())
 }
 
-pub fn led_save(raw: &Raw) -> Result<()> {
-    raw.query(&[KC_RGB, rgb::SAVE])?;
+pub async fn led_save(raw: &Raw) -> Result<()> {
+    raw.query(&[KC_RGB, rgb::SAVE]).await?;
     Ok(())
 }
 
-pub fn led_count(raw: &Raw) -> Result<Option<u8>> {
-    Ok(raw.try_query(&[KC_RGB, 5])?.map(|r| r[3]))
+pub async fn led_count(raw: &Raw) -> Result<Option<u8>> {
+    Ok(raw.try_query(&[KC_RGB, 5]).await?.map(|r| r[3]))
 }
 
 #[cfg(test)]

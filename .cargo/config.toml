@@ -1,0 +1,3 @@
+# WebHID bindings in web-sys are behind this flag.
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg=web_sys_unstable_apis"]

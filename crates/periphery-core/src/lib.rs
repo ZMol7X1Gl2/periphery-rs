@@ -1,11 +1,16 @@
 //! Brand-neutral device model. Drivers describe their settings as data; the
 //! GUI and CLI render whatever a device reports without knowing the brand.
+//!
+//! Device I/O is async so the same drivers run on the desktop (over hidapi)
+//! and in the browser (over WebHID); see [`hid`]. Implement the traits with
+//! `#[async_trait(?Send)]`.
 
 use anyhow::{Result, bail};
 pub mod backup;
 
-pub use hidapi;
-use hidapi::HidApi;
+pub use async_trait::async_trait;
+pub use hid_transport as hid;
+use hid::{Api, Filter};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeviceKind {
@@ -263,49 +268,60 @@ impl Snapshot {
     }
 }
 
-pub trait Device: Send {
+#[async_trait(?Send)]
+pub trait Device {
     fn info(&self) -> &DeviceInfo;
 
     /// Reads the complete current state from the device.
-    fn snapshot(&mut self) -> Result<Snapshot>;
+    async fn snapshot(&mut self) -> Result<Snapshot>;
 
     /// Applies one setting by id.
-    fn set(&mut self, id: &str, value: &Value) -> Result<()>;
+    async fn set(&mut self, id: &str, value: &Value) -> Result<()>;
 
-    fn set_key(&mut self, _layer: u8, _row: u8, _col: u8, _code: u16) -> Result<()> {
+    async fn set_key(&mut self, _layer: u8, _row: u8, _col: u8, _code: u16) -> Result<()> {
         bail!("this device has no keymap")
     }
 
     /// Sets a [`KeyProperty`] for several keys; `None` resets them to default.
-    fn set_key_property(&mut self, _id: &str, _keys: &[(u8, u8)], _value: Option<&Value>) -> Result<()> {
+    async fn set_key_property(&mut self, _id: &str, _keys: &[(u8, u8)], _value: Option<&Value>) -> Result<()> {
         bail!("this device has no per-key settings")
     }
 
     /// Replaces the whole [`KeyPairList`] `id`.
-    fn set_key_pairs(&mut self, _id: &str, _pairs: &[KeyPair]) -> Result<()> {
+    async fn set_key_pairs(&mut self, _id: &str, _pairs: &[KeyPair]) -> Result<()> {
         bail!("this device has no key pair settings")
     }
 
-    /// Non-blocking: true when the device reports changes made on the device
-    /// itself (on-board buttons), so the UI should refresh.
-    fn poll_changes(&mut self) -> Result<bool> {
+    /// Returns at once: true when the device reports changes made on the
+    /// device itself (on-board buttons), so the UI should refresh.
+    async fn poll_changes(&mut self) -> Result<bool> {
         Ok(false)
     }
 }
 
+#[async_trait(?Send)]
 pub trait Driver: Sync {
     fn name(&self) -> &'static str;
 
+    /// The HID interfaces this driver talks to. The browser only shows a page
+    /// devices the user picked, and the picker lists only matching ones.
+    fn filters(&self) -> Vec<Filter>;
+
     /// Opens every supported device in the current HID enumeration.
-    fn discover(&self, api: &HidApi) -> Vec<Result<Box<dyn Device>>>;
+    async fn discover(&self, api: &Api) -> Vec<Result<Box<dyn Device>>>;
+}
+
+/// Every driver's filters, for [`Api::request`].
+pub fn filters(drivers: &[&dyn Driver]) -> Vec<Filter> {
+    drivers.iter().flat_map(|d| d.filters()).collect()
 }
 
 /// Runs every driver; returns opened devices and per-device errors.
-pub fn discover_all(api: &HidApi, drivers: &[&dyn Driver]) -> (Vec<Box<dyn Device>>, Vec<String>) {
+pub async fn discover_all(api: &Api, drivers: &[&dyn Driver]) -> (Vec<Box<dyn Device>>, Vec<String>) {
     let mut devices = Vec::new();
     let mut errors = Vec::new();
     for d in drivers {
-        for r in d.discover(api) {
+        for r in d.discover(api).await {
             match r {
                 Ok(dev) => devices.push(dev),
                 Err(e) => errors.push(format!("{}: {e:#}", d.name())),

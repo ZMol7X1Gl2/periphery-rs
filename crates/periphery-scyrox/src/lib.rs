@@ -2,13 +2,12 @@
 
 use scyrox::{config, device, keys, protocol};
 
-use std::thread::sleep;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
-use periphery_core::hidapi::HidApi;
+use periphery_core::hid::{self, Api, Filter};
 use periphery_core::{
-    Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Setting, Snapshot, Value,
+    Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Setting, Snapshot, Value, async_trait,
 };
 
 use config::{ANGLE_TUNE_RANGE, Change, KEY_NAMES, MAX_DEBOUNCE, PROFILES, REPORT_RATES, SLEEP_OPTIONS, STAGES};
@@ -18,19 +17,27 @@ use protocol::{FIRE_INTERVAL, FIRE_TIMES, KeyAction, Macro, MacroEvent, Sensor, 
 
 pub struct ScyroxDriver;
 
+#[async_trait(?Send)]
 impl Driver for ScyroxDriver {
     fn name(&self) -> &'static str {
         "scyrox"
     }
 
-    fn discover(&self, api: &HidApi) -> Vec<Result<Box<dyn Device>>> {
-        let present = api.device_list().any(|d| {
-            d.vendor_id() == protocol::VENDOR_ID && protocol::PRODUCT_IDS.contains(&d.product_id())
+    fn filters(&self) -> Vec<Filter> {
+        protocol::PRODUCT_IDS
+            .iter()
+            .map(|pid| Filter { vendor_id: Some(protocol::VENDOR_ID), product_id: Some(*pid), ..Filter::default() })
+            .collect()
+    }
+
+    async fn discover(&self, api: &Api) -> Vec<Result<Box<dyn Device>>> {
+        let present = api.devices().any(|d| {
+            d.vendor_id == protocol::VENDOR_ID && protocol::PRODUCT_IDS.contains(&d.product_id)
         });
         if !present {
             return Vec::new();
         }
-        vec![Mouse::open(api).map(|m| Box::new(ScyroxDevice::new(m)) as Box<dyn Device>)]
+        vec![Mouse::open(api).await.map(|m| Box::new(ScyroxDevice::new(m)) as Box<dyn Device>)]
     }
 }
 
@@ -68,15 +75,15 @@ impl ScyroxDevice {
         self.last.as_ref()?.mouse.as_ref().map(|o| &o.settings)
     }
 
-    fn pair(&self) -> Result<()> {
+    async fn pair(&self) -> Result<()> {
         let m = &self.mouse;
         if m.info.wired() {
             bail!("pairing only works through the wireless receiver");
         }
-        m.enter_pair(if m.info.cid == 0 { 62 } else { m.info.cid })?;
+        m.enter_pair(if m.info.cid == 0 { 62 } else { m.info.cid }).await?;
         for _ in 0..20 {
-            sleep(Duration::from_secs(1));
-            match m.pair_state()?.0 {
+            hid::sleep(Duration::from_secs(1)).await;
+            match m.pair_state().await?.0 {
                 pair::SUCCESS => return Ok(()),
                 pair::FAILED => bail!("pairing failed"),
                 _ => {}
@@ -290,13 +297,14 @@ fn button_choice(action: KeyAction, s: &config::Settings, k: usize) -> (i64, Opt
     }
 }
 
+#[async_trait(?Send)]
 impl Device for ScyroxDevice {
     fn info(&self) -> &DeviceInfo {
         &self.info
     }
 
-    fn snapshot(&mut self) -> Result<Snapshot> {
-        let snap = self.mouse.snapshot()?;
+    async fn snapshot(&mut self) -> Result<Snapshot> {
+        let snap = self.mouse.snapshot().await?;
         let mut out = Snapshot::default();
         let wired = snap.info.wired();
         let conn = if wired { "Wired".to_string() } else { "Wireless".to_string() };
@@ -514,21 +522,21 @@ impl Device for ScyroxDevice {
         Ok(out)
     }
 
-    fn set(&mut self, id: &str, value: &Value) -> Result<()> {
+    async fn set(&mut self, id: &str, value: &Value) -> Result<()> {
         match id {
-            "pair" => return self.pair(),
+            "pair" => return self.pair().await,
             "reset" => {
-                self.mouse.require_online()?;
-                return self.mouse.factory_reset();
+                self.mouse.require_online().await?;
+                return self.mouse.factory_reset().await;
             }
             _ => {}
         }
         let Some(change) = self.change_for(id, value)? else { return Ok(()) };
-        self.mouse.require_online()?;
-        self.mouse.apply(&change)
+        self.mouse.require_online().await?;
+        self.mouse.apply(&change).await
     }
 
-    fn poll_changes(&mut self) -> Result<bool> {
-        Ok(self.mouse.poll_status()?.is_some())
+    async fn poll_changes(&mut self) -> Result<bool> {
+        Ok(self.mouse.poll_status().await?.is_some())
     }
 }

@@ -8,4 +8,4 @@ repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-hidapi.workspace = true
+hid-transport.workspace = true

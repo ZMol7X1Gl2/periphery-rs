@@ -2,10 +2,12 @@
 //! encodings, combo keys, macros, pairing and profiles.
 //!
 //! ```no_run
-//! let api = hidapi::HidApi::new()?;
-//! let mouse = scyrox::device::Mouse::open(&api)?;
-//! println!("{:?}", mouse.snapshot()?);
-//! # anyhow::Ok(())
+//! # async fn demo() -> anyhow::Result<()> {
+//! let api = hid_transport::Api::new().await?;
+//! let mouse = scyrox::device::Mouse::open(&api).await?;
+//! println!("{:?}", mouse.snapshot().await?);
+//! # Ok(())
+//! # }
 //! ```
 
 pub mod config;

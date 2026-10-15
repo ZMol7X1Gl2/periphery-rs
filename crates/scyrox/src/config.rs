@@ -151,37 +151,37 @@ const BACKUP_VERSION: u8 = 1;
 impl Mouse {
     /// Reads `first` bytes, then the rest of a variable-length block whose
     /// total size `total` computes from what was read (like `Read_Macro`).
-    fn read_block(&self, start: u16, first: usize, total: impl Fn(&[u8]) -> usize) -> Result<Vec<u8>> {
-        let mut b = self.read_flash(start, first)?;
+    async fn read_block(&self, start: u16, first: usize, total: impl Fn(&[u8]) -> usize) -> Result<Vec<u8>> {
+        let mut b = self.read_flash(start, first).await?;
         let len = total(&b);
         if len > b.len() {
-            b.extend(self.read_flash(start + b.len() as u16, len - b.len())?);
+            b.extend(self.read_flash(start + b.len() as u16, len - b.len()).await?);
         }
         Ok(b)
     }
 
-    fn read_shortcut(&self, key: u8) -> Result<Option<Shortcut>> {
+    async fn read_shortcut(&self, key: u8) -> Result<Option<Shortcut>> {
         let start = addr::SHORTCUT + key as u16 * Shortcut::BLOCK;
         let b = self.read_block(start, CHUNK, |b| {
             ((b[0] as usize / 2) * 6 + 2).min(Shortcut::BLOCK as usize)
-        })?;
+        }).await?;
         Ok(Shortcut::decode(&b))
     }
 
-    fn read_macro(&self, key: u8) -> Result<Option<Macro>> {
+    async fn read_macro(&self, key: u8) -> Result<Option<Macro>> {
         let start = addr::MACRO + key as u16 * Macro::BLOCK;
         let b = self.read_block(start, 32 + CHUNK, |b| {
             33 + (b[31] as usize).min(Macro::MAX_EVENTS) * 5
-        })?;
+        }).await?;
         Ok(Macro::decode(&b))
     }
 
-    pub fn read_settings(&self) -> Result<Settings> {
+    pub async fn read_settings(&self) -> Result<Settings> {
         let sensor = self.sensor();
-        let f = self.read_flash(0, 256)?;
+        let f = self.read_flash(0, 256).await?;
         let dpi_blocks = match sensor {
             Sensor::Paw3950 => f[addr::DPI_VALUE as usize..][..32].to_vec(),
-            Sensor::Paw3955 => self.read_flash(addr::SENSOR_3955_DPI, 48)?,
+            Sensor::Paw3955 => self.read_flash(addr::SENSOR_3955_DPI, 48).await?,
         };
         let block = dpi_blocks.len() / STAGES as usize;
         let at = |a: u16| f[a as usize];
@@ -196,8 +196,8 @@ impl Mouse {
         let mut macros = vec![None; KEYS as usize];
         for (k, a) in keys.iter().enumerate() {
             match a {
-                KeyAction::Shortcut => shortcuts[k] = self.read_shortcut(k as u8)?,
-                KeyAction::Macro { .. } => macros[k] = self.read_macro(k as u8)?,
+                KeyAction::Shortcut => shortcuts[k] = self.read_shortcut(k as u8).await?,
+                KeyAction::Macro { .. } => macros[k] = self.read_macro(k as u8).await?,
                 _ => {}
             }
         }
@@ -231,14 +231,14 @@ impl Mouse {
         })
     }
 
-    pub fn snapshot(&self) -> Result<Snapshot> {
-        let mouse = if self.online()? {
+    pub async fn snapshot(&self) -> Result<Snapshot> {
+        let mouse = if self.online().await? {
             Some(Online {
-                firmware: self.version()?,
-                battery: self.battery()?,
-                profile: self.profile()?,
-                long_range: if self.info.wired() { None } else { self.long_range()? },
-                settings: self.read_settings()?,
+                firmware: self.version().await?,
+                battery: self.battery().await?,
+                profile: self.profile().await?,
+                long_range: if self.info.wired() { None } else { self.long_range().await? },
+                settings: self.read_settings().await?,
             })
         } else {
             None
@@ -248,13 +248,13 @@ impl Mouse {
             product_id: self.product_id,
             info: self.info,
             sensor: self.sensor(),
-            dongle_version: self.dongle_version()?,
+            dongle_version: self.dongle_version().await?,
             mouse,
         })
     }
 
     /// Validates and writes one setting. Caller must check the mouse is online.
-    pub fn apply(&self, change: &Change) -> Result<()> {
+    pub async fn apply(&self, change: &Change) -> Result<()> {
         let sensor = self.sensor();
         let stage = |s: u8| {
             if s >= STAGES {
@@ -276,61 +276,61 @@ impl Mouse {
                 if hz > self.info.max_report_rate() {
                     bail!("this connection supports at most {} Hz", self.info.max_report_rate());
                 }
-                self.write_setting(addr::REPORT_RATE, v)
+                self.write_setting(addr::REPORT_RATE, v).await
             }
             &Change::Dpi(s, dpi) => {
                 sensor.validate_dpi(dpi).map_err(anyhow::Error::msg)?;
-                self.write_flash(sensor.dpi_addr(stage(s)?), &sensor.encode_dpi(dpi))
+                self.write_flash(sensor.dpi_addr(stage(s)?), &sensor.encode_dpi(dpi)).await
             }
             &Change::StageCount(n) => {
                 if !(1..=STAGES).contains(&n) {
                     bail!("stage count must be 1-{STAGES}");
                 }
-                self.write_setting(addr::DPI_STAGE_COUNT, n)
+                self.write_setting(addr::DPI_STAGE_COUNT, n).await
             }
-            &Change::CurrentStage(s) => self.write_setting(addr::CURRENT_DPI, stage(s)?),
+            &Change::CurrentStage(s) => self.write_setting(addr::CURRENT_DPI, stage(s)?).await,
             &Change::DpiColor(s, [r, g, b]) => {
                 let mut block = [r, g, b, 0];
                 block[3] = protocol::data_checksum(&block[..3]);
-                self.write_flash(addr::DPI_COLOR + stage(s)? as u16 * 4, &block)
+                self.write_flash(addr::DPI_COLOR + stage(s)? as u16 * 4, &block).await
             }
-            &Change::Lod(v) => self.write_setting(addr::LOD, v),
-            &Change::Debounce(ms) => self.write_setting(addr::DEBOUNCE, ms.min(MAX_DEBOUNCE)),
+            &Change::Lod(v) => self.write_setting(addr::LOD, v).await,
+            &Change::Debounce(ms) => self.write_setting(addr::DEBOUNCE, ms.min(MAX_DEBOUNCE)).await,
             &Change::ReleaseDebounce(ms) => {
-                self.write_setting(addr::DEBOUNCE_RELEASE, ms.min(MAX_DEBOUNCE))
+                self.write_setting(addr::DEBOUNCE_RELEASE, ms.min(MAX_DEBOUNCE)).await
             }
             &Change::WheelDebounce(ms) => {
-                self.write_setting(addr::WHEEL_DEBOUNCE, ms.min(MAX_DEBOUNCE))
+                self.write_setting(addr::WHEEL_DEBOUNCE, ms.min(MAX_DEBOUNCE)).await
             }
-            &Change::MotionSync(on) => self.write_setting(addr::MOTION_SYNC, on as u8),
-            &Change::AngleSnap(on) => self.write_setting(addr::ANGLE_SNAP, on as u8),
-            &Change::Ripple(on) => self.write_setting(addr::RIPPLE, on as u8),
-            &Change::Competition(on) => self.write_setting(addr::COMPETITION, on as u8),
-            &Change::Scan20k(on) => self.write_setting(addr::SCAN_20K, on as u8),
+            &Change::MotionSync(on) => self.write_setting(addr::MOTION_SYNC, on as u8).await,
+            &Change::AngleSnap(on) => self.write_setting(addr::ANGLE_SNAP, on as u8).await,
+            &Change::Ripple(on) => self.write_setting(addr::RIPPLE, on as u8).await,
+            &Change::Competition(on) => self.write_setting(addr::COMPETITION, on as u8).await,
+            &Change::Scan20k(on) => self.write_setting(addr::SCAN_20K, on as u8).await,
             &Change::SensorMode(m) => {
                 if m > 1 {
                     bail!("sensor mode must be LP (0) or HP (1)");
                 }
-                self.write_setting(addr::SENSOR_MODE, m)
+                self.write_setting(addr::SENSOR_MODE, m).await
             }
             &Change::AngleTune(deg) => {
                 if !ANGLE_TUNE_RANGE.contains(&deg) {
                     bail!("angle tune must be -30..30 degrees");
                 }
-                self.write_setting(addr::ANGLE_TUNE_STATE, 1)?;
-                self.write_setting(addr::ANGLE_TUNE, deg as u8)
+                self.write_setting(addr::ANGLE_TUNE_STATE, 1).await?;
+                self.write_setting(addr::ANGLE_TUNE, deg as u8).await
             }
             &Change::SleepSecs(secs) => {
                 // The Scyrox UI writes the same value to both slots.
                 let v = (secs / 10).clamp(1, 255) as u8;
-                self.write_setting(addr::SLEEP_TIME, v)?;
-                self.write_setting(addr::PERFORMANCE, v)
+                self.write_setting(addr::SLEEP_TIME, v).await?;
+                self.write_setting(addr::PERFORMANCE, v).await
             }
             &Change::LongRange(on) => {
                 if self.info.wired() {
                     bail!("long-range mode only applies to the wireless receiver");
                 }
-                self.set_long_range(on)
+                self.set_long_range(on).await
             }
             &Change::Key(k, action) => {
                 match action {
@@ -345,7 +345,7 @@ impl Mouse {
                     _ => {}
                 }
                 let k = key(k)?;
-                self.write_flash(addr::KEY_FUNCTION + k as u16 * 4, &action.flash_block(k))
+                self.write_flash(addr::KEY_FUNCTION + k as u16 * 4, &action.flash_block(k)).await
             }
             Change::Shortcut(k, s) => {
                 let k = key(*k)?;
@@ -353,9 +353,9 @@ impl Mouse {
                     bail!("a combo key has 1-{} keys", Shortcut::MAX_KEYS);
                 }
                 // Same order as the web driver: keys first, then the binding.
-                self.write_flash(addr::SHORTCUT + k as u16 * Shortcut::BLOCK, &s.encode())?;
+                self.write_flash(addr::SHORTCUT + k as u16 * Shortcut::BLOCK, &s.encode()).await?;
                 let block = KeyAction::Shortcut.flash_block(k);
-                self.write_flash(addr::KEY_FUNCTION + k as u16 * 4, &block)
+                self.write_flash(addr::KEY_FUNCTION + k as u16 * 4, &block).await
             }
             Change::Macro(k, m, cycle) => {
                 let k = key(*k)?;
@@ -370,34 +370,34 @@ impl Mouse {
                 }
                 // Same order as the web driver: binding first, then the macro.
                 let block = KeyAction::Macro { cycle: *cycle }.flash_block(k);
-                self.write_flash(addr::KEY_FUNCTION + k as u16 * 4, &block)?;
-                self.write_flash(addr::MACRO + k as u16 * Macro::BLOCK, &m.encode())
+                self.write_flash(addr::KEY_FUNCTION + k as u16 * 4, &block).await?;
+                self.write_flash(addr::MACRO + k as u16 * Macro::BLOCK, &m.encode()).await
             }
             &Change::Profile(p) => {
                 if p >= PROFILES {
                     bail!("profile must be 1-{PROFILES}");
                 }
-                if self.profile()?.is_none() {
+                if self.profile().await?.is_none() {
                     bail!("this device does not support onboard profiles");
                 }
-                self.set_profile(p)
+                self.set_profile(p).await
             }
         }
     }
 
     /// Saves the active profile (settings, buttons, combo keys and macros).
-    pub fn backup(&self) -> Result<Vec<u8>> {
+    pub async fn backup(&self) -> Result<Vec<u8>> {
         let sensor = self.sensor();
         let mut out = BACKUP_MAGIC.to_vec();
         out.extend([BACKUP_VERSION, self.info.cid, self.info.mid, sensor as u8]);
         for (start, len) in profile_regions(sensor) {
-            out.extend(self.read_flash(start, len)?);
+            out.extend(self.read_flash(start, len).await?);
         }
         Ok(out)
     }
 
     /// Writes a backup into the active profile, touching only changed chunks.
-    pub fn restore(&self, data: &[u8]) -> Result<()> {
+    pub async fn restore(&self, data: &[u8]) -> Result<()> {
         let sensor = self.sensor();
         if data.len() < 8 || &data[..4] != BACKUP_MAGIC || data[4] != BACKUP_VERSION {
             bail!("not a Scyrox backup file");
@@ -412,7 +412,7 @@ impl Mouse {
         }
         let mut body = &data[8..];
         for (start, len) in regions {
-            self.write_diff(start, &body[..len])?;
+            self.write_diff(start, &body[..len]).await?;
             body = &body[len..];
         }
         Ok(())

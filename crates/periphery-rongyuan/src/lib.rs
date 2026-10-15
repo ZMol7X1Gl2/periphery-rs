@@ -2,8 +2,8 @@
 //! crate): the Ajazz AJ179 and AJ159 series, wired or through their receiver.
 
 use anyhow::{Result, bail};
-use periphery_core::hidapi::HidApi;
-use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Setting, Snapshot, Value};
+use periphery_core::hid::{Api, Filter};
+use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Setting, Snapshot, Value, async_trait};
 use rongyuan::pan1080::{
     ACTIONS, BUTTONS, DEFAULT_COLORS, DEFAULT_DPIS, DpiStage, Options, REPORT_RATES, action_label,
 };
@@ -11,19 +11,26 @@ use rongyuan::{Model, Mouse, models};
 
 pub struct RongyuanDriver;
 
+#[async_trait(?Send)]
 impl Driver for RongyuanDriver {
     fn name(&self) -> &'static str {
         "rongyuan"
     }
 
-    fn discover(&self, api: &HidApi) -> Vec<Result<Box<dyn Device>>> {
-        Mouse::candidates(api)
-            .filter_map(|info| match Mouse::open(api, info) {
-                Ok(Some(m)) => Some(Ok(Box::new(RongyuanDevice::new(m)) as Box<dyn Device>)),
-                Ok(None) => None,
-                Err(e) => Some(Err(e.context(format!("{:04x}:{:04x}", info.vendor_id(), info.product_id())))),
-            })
-            .collect()
+    fn filters(&self) -> Vec<Filter> {
+        vec![Mouse::FILTER]
+    }
+
+    async fn discover(&self, api: &Api) -> Vec<Result<Box<dyn Device>>> {
+        let mut out = Vec::new();
+        for info in Mouse::candidates(api) {
+            match Mouse::open(api, info).await {
+                Ok(Some(m)) => out.push(Ok(Box::new(RongyuanDevice::new(m)) as Box<dyn Device>)),
+                Ok(None) => {}
+                Err(e) => out.push(Err(e.context(format!("{:04x}:{:04x}", info.vendor_id, info.product_id)))),
+            }
+        }
+        out
     }
 }
 
@@ -56,8 +63,8 @@ impl RongyuanDevice {
         RongyuanDevice { mouse, info }
     }
 
-    fn require_model(&mut self) -> Result<&'static Model> {
-        if self.mouse.identify()?.is_none() {
+    async fn require_model(&mut self) -> Result<&'static Model> {
+        if self.mouse.identify().await?.is_none() {
             bail!("the mouse is asleep or switched off — move it to wake it up");
         }
         match self.mouse.model() {
@@ -75,25 +82,26 @@ impl RongyuanDevice {
     }
 
     /// Changes one option-block field and checks it reads back.
-    fn edit_options<T: PartialEq + std::fmt::Debug>(
+    async fn edit_options<T: PartialEq + std::fmt::Debug>(
         &self,
         edit: impl FnOnce(&mut Options) -> Result<()>,
         check: impl Fn(&Options) -> T,
     ) -> Result<()> {
-        let mut o = self.mouse.options()?;
+        let mut o = self.mouse.options().await?;
         edit(&mut o)?;
-        self.mouse.set_options(&o, check)
+        self.mouse.set_options(&o, check).await
     }
 }
 
+#[async_trait(?Send)]
 impl Device for RongyuanDevice {
     fn info(&self) -> &DeviceInfo {
         &self.info
     }
 
-    fn snapshot(&mut self) -> Result<Snapshot> {
+    async fn snapshot(&mut self) -> Result<Snapshot> {
         let mut out = Snapshot::default();
-        let status = self.mouse.status()?;
+        let status = self.mouse.status().await?;
         out.status.push((
             "Connection".into(),
             if status.is_some() { "2.4 GHz receiver".into() } else { "Wired".into() },
@@ -105,7 +113,7 @@ impl Device for RongyuanDevice {
             }
             out.status.push(("Battery".into(), format!("{}%", s.battery)));
         }
-        if self.mouse.identify()?.is_some() {
+        if self.mouse.identify().await?.is_some() {
             let info = device_info(&self.mouse);
             if info.model != self.info.model {
                 self.info = info;
@@ -119,11 +127,11 @@ impl Device for RongyuanDevice {
             ));
             return Ok(out);
         };
-        out.status.push(("Firmware".into(), format!("{:x}", self.mouse.firmware()?)));
+        out.status.push(("Firmware".into(), format!("{:x}", self.mouse.firmware().await?)));
         out.status.push(("Sensor".into(), format!("{:?}", model.sensor).to_uppercase()));
         out.status.push(("Model id".into(), id.to_string()));
 
-        let o = self.mouse.options()?;
+        let o = self.mouse.options().await?;
         let profile = o.profile();
         let mut g = Group::new("Profile");
         g.push(Setting::new(
@@ -138,7 +146,7 @@ impl Device for RongyuanDevice {
         if let Some(rate) = o.report_rate() {
             perf.push(Setting::new("rate", "Polling rate", Kind::Choice(self.rates()), Value::Int(rate as i64)));
         }
-        let dpi = self.mouse.dpi(profile)?;
+        let dpi = self.mouse.dpi(profile).await?;
         perf.push(Setting::new(
             "stages",
             "DPI stages",
@@ -186,7 +194,7 @@ impl Device for RongyuanDevice {
         g.push(Setting::toggle("ripple", "Ripple control", o.ripple()));
         out.groups.push(g);
 
-        let buttons = self.mouse.buttons(profile)?;
+        let buttons = self.mouse.buttons(profile).await?;
         let mut g = Group::new("Buttons");
         for (k, (name, action)) in BUTTONS.iter().zip(buttons.iter()).enumerate() {
             let mut options: Vec<(i64, String)> =
@@ -208,8 +216,8 @@ impl Device for RongyuanDevice {
         Ok(out)
     }
 
-    fn set(&mut self, id: &str, value: &Value) -> Result<()> {
-        let model = self.require_model()?;
+    async fn set(&mut self, id: &str, value: &Value) -> Result<()> {
+        let model = self.require_model().await?;
         let (name, index) = match id.split_once('.') {
             Some((n, i)) => (n, i.parse::<usize>().ok()),
             None => (id, None),
@@ -221,33 +229,33 @@ impl Device for RongyuanDevice {
                 if !(0..model.profiles as i64).contains(&p) {
                     bail!("profile must be 1..={}", model.profiles);
                 }
-                self.edit_options(|o| Ok(o.set_profile(p as u8)), Options::profile)
+                self.edit_options(|o| Ok(o.set_profile(p as u8)), Options::profile).await
             }
             "rate" => {
                 let hz = value.int()? as u32;
                 if hz > self.mouse.max_rate {
                     bail!("{hz} Hz needs a faster connection (max {} Hz here)", self.mouse.max_rate);
                 }
-                self.edit_options(|o| o.set_report_rate(hz), Options::report_rate)
+                self.edit_options(|o| o.set_report_rate(hz), Options::report_rate).await
             }
             "lod" => {
                 let v = value.int()?;
                 if !(0..model.sensor.lod_mm().len() as i64).contains(&v) {
                     bail!("invalid lift-off distance");
                 }
-                self.edit_options(|o| Ok(o.set_lod(v as u8)), Options::lod)
+                self.edit_options(|o| Ok(o.set_lod(v as u8)), Options::lod).await
             }
             "angle_snap" => {
                 let on = value.bool()?;
-                self.edit_options(|o| Ok(o.set_angle_snap(on)), Options::angle_snap)
+                self.edit_options(|o| Ok(o.set_angle_snap(on)), Options::angle_snap).await
             }
             "ripple" => {
                 let on = value.bool()?;
-                self.edit_options(|o| Ok(o.set_ripple(on)), Options::ripple)
+                self.edit_options(|o| Ok(o.set_ripple(on)), Options::ripple).await
             }
             "stages" | "stage" | "dpi" | "color" => {
-                let profile = self.mouse.options()?.profile();
-                let mut t = self.mouse.dpi(profile)?;
+                let profile = self.mouse.options().await?.profile();
+                let mut t = self.mouse.dpi(profile).await?;
                 match name {
                     "stages" => {
                         let n = value.int()?.clamp(1, model.stages as i64) as usize;
@@ -280,7 +288,7 @@ impl Device for RongyuanDevice {
                         }
                     }
                 }
-                self.mouse.set_dpi(profile, &t)
+                self.mouse.set_dpi(profile, &t).await
             }
             "key" => {
                 let k = idx()?;
@@ -292,21 +300,21 @@ impl Device for RongyuanDevice {
                 if k >= BUTTONS.len() {
                     bail!("no button {k}");
                 }
-                let profile = self.mouse.options()?.profile();
-                self.mouse.set_button(profile, k as u8, *action)
+                let profile = self.mouse.options().await?.profile();
+                self.mouse.set_button(profile, k as u8, *action).await
             }
-            "reset" => self.mouse.factory_reset(),
+            "reset" => self.mouse.factory_reset().await,
             _ => bail!("unknown setting {id}"),
         }
     }
 }
 
 /// Raw replies for bug reports (`periphery-cli diag`); read-only.
-pub fn diag(api: &HidApi) -> Vec<String> {
+pub async fn diag(api: &Api) -> Vec<String> {
     let mut out = Vec::new();
     for info in Mouse::candidates(api) {
-        let head = format!("rongyuan {:04x}:{:04x}", info.vendor_id(), info.product_id());
-        let mut mouse = match Mouse::open(api, info) {
+        let head = format!("rongyuan {:04x}:{:04x}", info.vendor_id, info.product_id);
+        let mut mouse = match Mouse::open(api, info).await {
             Ok(Some(m)) => m,
             Ok(None) => {
                 out.push(format!("{head}: receiver without a mouse"));
@@ -323,14 +331,15 @@ pub fn diag(api: &HidApi) -> Vec<String> {
             Ok(v) => out.push(format!("  {label:<10} {v}")),
             Err(e) => out.push(format!("  {label:<10} ERROR {e:#}")),
         };
-        show("status", mouse.status().map(|s| format!("{s:?}")));
-        show("model id", mouse.identify().map(|id| format!("{id:?} {:?}", mouse.model().map(|m| m.name))));
-        show("firmware", mouse.firmware().map(|v| format!("{v:x}")));
-        let options = mouse.options();
+        show("status", mouse.status().await.map(|s| format!("{s:?}")));
+        let id = mouse.identify().await;
+        show("model id", id.map(|id| format!("{id:?} {:?}", mouse.model().map(|m| m.name))));
+        show("firmware", mouse.firmware().await.map(|v| format!("{v:x}")));
+        let options = mouse.options().await;
         let profile = options.as_ref().map(|o| o.profile()).unwrap_or(0);
         show("options", options.map(|o| hex(&o.raw)));
-        show("dpi", mouse.dpi(profile).map(|t| format!("{t:?}")));
-        show("buttons", mouse.buttons_raw(profile).map(|r| hex(&r)));
+        show("dpi", mouse.dpi(profile).await.map(|t| format!("{t:?}")));
+        show("buttons", mouse.buttons_raw(profile).await.map(|r| hex(&r)));
     }
     out
 }

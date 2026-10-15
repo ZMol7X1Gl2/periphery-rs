@@ -1,0 +1,96 @@
+name: Pages
+
+# Builds the web app (crates/web) and publishes it to the gh-pages branch:
+#   master        -> https://<owner>.github.io/<repo>/
+#   other branches -> https://<owner>.github.io/<repo>/<branch>/
+# Branch names are lowercased and every character other than a-z, 0-9, '.',
+# '-' and '_' becomes '-' (feature/webhid -> feature-webhid). Deleting a
+# branch removes its preview.
+on:
+  push:
+    branches: ["**", "!gh-pages"]
+  delete:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# One writer to gh-pages at a time; later pushes wait instead of failing.
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
+env:
+  TRUNK_VERSION: v0.21.14
+
+jobs:
+  deploy:
+    if: github.event_name != 'delete'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preview path
+        id: path
+        shell: bash
+        run: |
+          branch="${GITHUB_REF_NAME}"
+          if [[ "$branch" == "master" ]]; then
+            slug=""
+          else
+            slug="$(echo "$branch" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')"
+          fi
+          repo="${GITHUB_REPOSITORY#*/}"
+          echo "slug=$slug" >> "$GITHUB_OUTPUT"
+          echo "public_url=/$repo/${slug:+$slug/}" >> "$GITHUB_OUTPUT"
+          echo "url=https://${GITHUB_REPOSITORY_OWNER,,}.github.io/$repo/${slug:+$slug/}" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install trunk
+        run: |
+          curl -sSL "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C /usr/local/bin trunk
+          trunk --version
+
+      - name: Build
+        working-directory: crates/web
+        run: trunk build --release --locked --public-url "${{ steps.path.outputs.public_url }}"
+
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: crates/web/dist
+          destination_dir: ${{ steps.path.outputs.slug }}
+          # Keep the other branches' previews (and master's root files).
+          keep_files: true
+          commit_message: "Deploy ${{ github.ref_name }} (${{ github.sha }})"
+
+      - name: Summary
+        run: echo "Deployed to ${{ steps.path.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
+
+  cleanup:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+      - name: Remove the branch preview
+        shell: bash
+        env:
+          BRANCH: ${{ github.event.ref }}
+        run: |
+          slug="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')"
+          if [[ -z "$slug" || ! -d "$slug" ]]; then
+            echo "No preview for $BRANCH"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git rm -rq -- "$slug"
+          git commit -qm "Remove preview of $BRANCH"
+          git push

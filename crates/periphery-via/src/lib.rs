@@ -3,10 +3,10 @@
 
 
 use anyhow::{Result, bail};
-use periphery_core::hidapi::{DeviceInfo as HidInfo, HidApi};
+use periphery_core::hid::{Api, DeviceInfo as HidInfo, Filter};
 use periphery_core::{
     Device, DeviceInfo, DeviceKind, Driver, Group, KeyPair, KeyPairList, KeyProperty, Keymap, Kind,
-    LayoutKey, Setting, Snapshot, Value,
+    LayoutKey, Setting, Snapshot, Value, async_trait,
 };
 
 use definition::{Definition, KEYCHRON_VID};
@@ -18,16 +18,24 @@ use qmk_via::{USAGE, USAGE_PAGE, cmd, definition, keychron, keycodes, macros, me
 
 pub struct ViaDriver;
 
+const FILTER: Filter = Filter { vendor_id: None, product_id: None, usage_page: Some(USAGE_PAGE), usage: Some(USAGE) };
+
+#[async_trait(?Send)]
 impl Driver for ViaDriver {
     fn name(&self) -> &'static str {
         "qmk-via"
     }
 
-    fn discover(&self, api: &HidApi) -> Vec<Result<Box<dyn Device>>> {
-        api.device_list()
-            .filter(|d| d.usage_page() == USAGE_PAGE && d.usage() == USAGE)
-            .map(|d| ViaKeyboard::open(api, d).map(|k| Box::new(k) as Box<dyn Device>))
-            .collect()
+    fn filters(&self) -> Vec<Filter> {
+        vec![FILTER]
+    }
+
+    async fn discover(&self, api: &Api) -> Vec<Result<Box<dyn Device>>> {
+        let mut out = Vec::new();
+        for d in api.devices().filter(|d| FILTER.matches(d)) {
+            out.push(ViaKeyboard::open(api, d).await.map(|k| Box::new(k) as Box<dyn Device>));
+        }
+        out
     }
 }
 
@@ -75,32 +83,30 @@ fn secs_choice(options: &[u16], current: u16) -> Kind {
 }
 
 impl ViaKeyboard {
-    fn open(api: &HidApi, d: &HidInfo) -> Result<Self> {
-        let raw = Raw::new(d.open_device(api)?);
-        raw.drain();
-        let p = raw.query(&[cmd::GET_PROTOCOL_VERSION])?;
+    async fn open(api: &Api, d: &HidInfo) -> Result<Self> {
+        let raw = Raw::new(api.open(d).await?);
+        raw.drain().await;
+        let p = raw.query(&[cmd::GET_PROTOCOL_VERSION]).await?;
         let protocol = u16::from_be_bytes([p[1], p[2]]);
         let json_version = raw
-            .try_query(&[cmd::GET_KEYBOARD_VALUE, 4])?
+            .try_query(&[cmd::GET_KEYBOARD_VALUE, 4])
+            .await?
             .map(|r| u32::from_be_bytes([r[2], r[3], r[4], r[5]]))
             .filter(|v| *v <= 100)
             .unwrap_or(0);
-        let layers = raw.query(&[cmd::GET_LAYER_COUNT])?[1];
-        let macros = raw.try_query(&[cmd::MACRO_GET_COUNT])?.map_or(0, |r| r[1]);
-        let kc = keychron::info(&raw)?;
+        let layers = raw.query(&[cmd::GET_LAYER_COUNT]).await?[1];
+        let macros = raw.try_query(&[cmd::MACRO_GET_COUNT]).await?.map_or(0, |r| r[1]);
+        let kc = keychron::info(&raw).await?;
 
-        let (vid, pid) = (d.vendor_id(), d.product_id());
-        let (def, def_error) = match definition::load(vid, pid, protocol, json_version) {
+        let (vid, pid) = (d.vendor_id, d.product_id);
+        let (def, def_error) = match definition::load(vid, pid, protocol, json_version).await {
             Ok(def) => (def, None),
             Err(e) => (None, Some(format!("{e:#}"))),
         };
         let menu = def.as_ref().map(|d| menus::parse(&d.menus)).unwrap_or_default();
-        let product = d.product_string().unwrap_or("Keyboard").to_string();
-        let brand = if vid == KEYCHRON_VID {
-            "Keychron".to_string()
-        } else {
-            d.manufacturer_string().unwrap_or("QMK").to_string()
-        };
+        let or = |s: &str, default: &str| if s.is_empty() { default.to_string() } else { s.to_string() };
+        let product = or(&d.product, "Keyboard");
+        let brand = if vid == KEYCHRON_VID { "Keychron".to_string() } else { or(&d.manufacturer, "QMK") };
         let model = def.as_ref().map_or(product, |d| d.name.clone());
         Ok(ViaKeyboard {
             raw,
@@ -123,11 +129,11 @@ impl ViaKeyboard {
         })
     }
 
-    fn lighting(&self) -> Result<Vec<Group>> {
+    async fn lighting(&self) -> Result<Vec<Group>> {
         // Read every value first: `showIf` expressions refer to other values.
         let mut read: Vec<(&MenuItem, Kind, Value, i64)> = Vec::new();
         for item in &self.menu {
-            let Some(r) = self.raw.try_query(&[cmd::CUSTOM_GET_VALUE, item.channel, item.value_id])? else {
+            let Some(r) = self.raw.try_query(&[cmd::CUSTOM_GET_VALUE, item.channel, item.value_id]).await? else {
                 continue;
             };
             let data = &r[3..];
@@ -165,8 +171,8 @@ impl ViaKeyboard {
         Ok(groups)
     }
 
-    fn he_group(&mut self) -> Result<Option<Group>> {
-        self.he = keychron::he_read(&self.raw)?;
+    async fn he_group(&mut self) -> Result<Option<Group>> {
+        self.he = keychron::he_read(&self.raw).await?;
         let Some(he) = &self.he else { return Ok(None) };
         let mut g = Group::new("Magnetic switches");
         if he.version != 4 {
@@ -204,9 +210,9 @@ impl ViaKeyboard {
         Ok(Some(g))
     }
 
-    fn keyboard_group(&mut self) -> Result<Option<Group>> {
+    async fn keyboard_group(&mut self) -> Result<Option<Group>> {
         let mut g = Group::new("Keyboard");
-        self.debounce = keychron::debounce_get(&self.raw)?;
+        self.debounce = keychron::debounce_get(&self.raw).await?;
         match self.debounce {
             Some(Debounce::Qmk { mode, ms }) => {
                 g.push(Setting::new(
@@ -229,7 +235,7 @@ impl ViaKeyboard {
             }
             None => {}
         }
-        if let Some((hz, supported)) = keychron::poll_get(&self.raw)? {
+        if let Some((hz, supported)) = keychron::poll_get(&self.raw).await? {
             g.push(Setting::new(
                 "poll",
                 "Polling rate",
@@ -238,7 +244,7 @@ impl ViaKeyboard {
             ));
         }
         let performance = self.kc.as_ref().is_some_and(|k| k.features.performance);
-        self.perf = if performance { keychron::perf_get(&self.raw)? } else { None };
+        self.perf = if performance { keychron::perf_get(&self.raw).await? } else { None };
         if let Some((_, mode)) = self.perf {
             g.push(Setting::new(
                 "perf",
@@ -249,12 +255,12 @@ impl ViaKeyboard {
         }
         if !performance {
             let version = self.kc.as_ref().map_or(0, |k| k.version);
-            if let Some(Nkro { switchable: true, on }) = keychron::nkro_get(&self.raw, version)? {
+            if let Some(Nkro { switchable: true, on }) = keychron::nkro_get(&self.raw, version).await? {
                 g.push(Setting::toggle("nkro", "N-key rollover", on));
             }
         }
         if self.def.as_ref().is_some_and(|d| d.has_feature("DIP")) {
-            if let Some(func) = keychron::dip_get(&self.raw)? {
+            if let Some(func) = keychron::dip_get(&self.raw).await? {
                 g.push(Setting::new(
                     "dip",
                     "DIP switch controls",
@@ -266,8 +272,8 @@ impl ViaKeyboard {
         Ok((!g.settings.is_empty()).then_some(g))
     }
 
-    fn power_group(&mut self) -> Result<Option<Group>> {
-        self.sleep = keychron::sleep_get(&self.raw)?;
+    async fn power_group(&mut self) -> Result<Option<Group>> {
+        self.sleep = keychron::sleep_get(&self.raw).await?;
         let Some(s) = self.sleep else { return Ok(None) };
         let mut g = Group::new("Power");
         if s.backlight > 0 {
@@ -285,7 +291,7 @@ impl ViaKeyboard {
         Ok(Some(g))
     }
 
-    fn keymap(&mut self) -> Result<Option<Keymap>> {
+    async fn keymap(&mut self) -> Result<Option<Keymap>> {
         let Some(def) = self.def.clone() else { return Ok(None) };
         let (rows, cols) = (def.matrix.rows, def.matrix.cols);
         let total = self.layers as usize * rows as usize * cols as usize * 2;
@@ -294,7 +300,7 @@ impl ViaKeyboard {
             let off = bytes.len() as u16;
             let n = (total - bytes.len()).min(28) as u8;
             let [hi, lo] = off.to_be_bytes();
-            let r = self.raw.query(&[cmd::KEYMAP_GET_BUFFER, hi, lo, n])?;
+            let r = self.raw.query(&[cmd::KEYMAP_GET_BUFFER, hi, lo, n]).await?;
             bytes.extend_from_slice(&r[4..4 + n as usize]);
         }
         let custom = def.custom_labels();
@@ -331,17 +337,17 @@ impl ViaKeyboard {
                 .into_iter()
                 .map(|g| periphery_core::KeycodeGroup { label: g.label, codes: g.codes })
                 .collect(),
-            properties: self.key_properties(rows, cols)?,
+            properties: self.key_properties(rows, cols).await?,
             pair_lists: self.pair_lists(),
         }))
     }
 
-    fn key_properties(&mut self, rows: u8, cols: u8) -> Result<Vec<KeyProperty>> {
+    async fn key_properties(&mut self, rows: u8, cols: u8) -> Result<Vec<KeyProperty>> {
         let n = rows as usize * cols as usize;
         let mut props = Vec::new();
         self.he_profile = None;
         if let Some(he) = self.he.as_ref().filter(|h| h.version == 4) {
-            let p = keychron::he_read_profile(&self.raw, he, rows, cols)?;
+            let p = keychron::he_read_profile(&self.raw, he, rows, cols).await?;
             let per_key = |f: &dyn Fn(&Travel) -> i64| -> Vec<Option<Value>> {
                 p.keys.iter().map(|k| (k.travel.mode != 0).then(|| Value::Int(f(&k.travel)))).collect()
             };
@@ -388,10 +394,10 @@ impl ViaKeyboard {
         }
         if self.kc.as_ref().is_some_and(|k| k.features.keychron_rgb) {
             if self.led_map.is_none() {
-                self.led_map = Some(keychron::led_map(&self.raw, rows, cols)?);
+                self.led_map = Some(keychron::led_map(&self.raw, rows, cols).await?);
             }
-            if let Some(count) = keychron::led_count(&self.raw)? {
-                let hsv = keychron::led_colors(&self.raw, count)?;
+            if let Some(count) = keychron::led_count(&self.raw).await? {
+                let hsv = keychron::led_colors(&self.raw, count).await?;
                 let map = self.led_map.as_ref().unwrap();
                 props.push(KeyProperty {
                     id: "rgb.key.color".into(),
@@ -423,17 +429,17 @@ impl ViaKeyboard {
         }]
     }
 
-    fn macros_group(&mut self) -> Result<Option<Group>> {
+    async fn macros_group(&mut self) -> Result<Option<Group>> {
         if self.macros == 0 {
             return Ok(None);
         }
-        let Some(r) = self.raw.try_query(&[cmd::MACRO_GET_BUFFER_SIZE])? else { return Ok(None) };
+        let Some(r) = self.raw.try_query(&[cmd::MACRO_GET_BUFFER_SIZE]).await? else { return Ok(None) };
         self.macro_size = u16::from_be_bytes([r[1], r[2]]);
         let mut buf = Vec::with_capacity(self.macro_size as usize);
         while buf.len() < self.macro_size as usize {
             let n = (self.macro_size as usize - buf.len()).min(28) as u8;
             let [hi, lo] = (buf.len() as u16).to_be_bytes();
-            let r = self.raw.query(&[cmd::MACRO_GET_BUFFER, hi, lo, n])?;
+            let r = self.raw.query(&[cmd::MACRO_GET_BUFFER, hi, lo, n]).await?;
             buf.extend_from_slice(&r[4..4 + n as usize]);
         }
         self.macro_bytes = macros::split(&buf, self.macros as usize);
@@ -456,7 +462,7 @@ impl ViaKeyboard {
         Ok(Some(g))
     }
 
-    fn set_macro(&mut self, index: usize, text: &str) -> Result<()> {
+    async fn set_macro(&mut self, index: usize, text: &str) -> Result<()> {
         if index >= self.macro_bytes.len() {
             bail!("no macro M{index}");
         }
@@ -471,13 +477,13 @@ impl ViaKeyboard {
             let [hi, lo] = ((i * 28) as u16).to_be_bytes();
             let mut req = vec![cmd::MACRO_SET_BUFFER, hi, lo, chunk.len() as u8];
             req.extend(chunk);
-            self.raw.query(&req)?;
+            self.raw.query(&req).await?;
         }
         self.macro_bytes = all;
         Ok(())
     }
 
-    fn set_key_travel(&mut self, field: &str, keys: &[(u8, u8)], v: i64) -> Result<()> {
+    async fn set_key_travel(&mut self, field: &str, keys: &[(u8, u8)], v: i64) -> Result<()> {
         let (Some(he), Some(p), Some(def)) = (&self.he, &self.he_profile, &self.def) else {
             bail!("no magnetic-switch data");
         };
@@ -497,32 +503,32 @@ impl ViaKeyboard {
             groups.entry(t).or_default().push((row, col));
         }
         for (t, keys) in groups {
-            keychron::he_set_keys(&self.raw, he.current, &keys, t)?;
+            keychron::he_set_keys(&self.raw, he.current, &keys, t).await?;
         }
         Ok(())
     }
 
     /// Puts keys back on the global travel setting (per-key mode 0, "Global"
     /// in the launcher's mode enum).
-    fn reset_key_travel(&mut self, keys: &[(u8, u8)]) -> Result<()> {
+    async fn reset_key_travel(&mut self, keys: &[(u8, u8)]) -> Result<()> {
         let Some(he) = &self.he else { bail!("no magnetic-switch data") };
         let t = Travel { mode: 0, ..he.global };
-        keychron::he_set_keys(&self.raw, he.current, keys, t)
+        keychron::he_set_keys(&self.raw, he.current, keys, t).await
     }
 
-    fn set_key_colors(&mut self, keys: &[(u8, u8)], rgb: [u8; 3]) -> Result<()> {
+    async fn set_key_colors(&mut self, keys: &[(u8, u8)], rgb: [u8; 3]) -> Result<()> {
         let (Some(map), Some(def)) = (&self.led_map, &self.def) else { bail!("no per-key lighting") };
         let cols = def.matrix.cols as usize;
         let hsv = menus::rgb_to_hsv(rgb);
         for &(row, col) in keys {
             if let Some(Some(led)) = map.get(row as usize * cols + col as usize) {
-                keychron::led_set(&self.raw, *led, &[hsv])?;
+                keychron::led_set(&self.raw, *led, &[hsv]).await?;
             }
         }
-        keychron::led_save(&self.raw)
+        keychron::led_save(&self.raw).await
     }
 
-    fn set_snap(&mut self, pairs: &[KeyPair]) -> Result<()> {
+    async fn set_snap(&mut self, pairs: &[KeyPair]) -> Result<()> {
         let (Some(he), Some(p)) = (&self.he, &self.he_profile) else { bail!("no magnetic-switch data") };
         let profile = he.current;
         for pair in pairs {
@@ -536,20 +542,20 @@ impl ViaKeyboard {
         let same = |s: &keychron::SnapPair, n: &KeyPair| s.a == n.a && s.b == n.b && s.mode as i64 == n.mode;
         let kept: Vec<&keychron::SnapPair> = p.snap.iter().filter(|s| pairs.iter().any(|n| same(s, n))).collect();
         for s in p.snap.iter().filter(|s| !kept.contains(s)) {
-            keychron::he_set_snap(&self.raw, profile, s.slot, (0, 0), (0, 0), 0)?;
+            keychron::he_set_snap(&self.raw, profile, s.slot, (0, 0), (0, 0), 0).await?;
         }
         let mut free = keychron::SNAP_SLOTS.filter(|slot| !kept.iter().any(|k| k.slot == *slot));
         for n in pairs.iter().filter(|n| !kept.iter().any(|s| same(s, n))) {
             let Some(slot) = free.next() else { bail!("at most {} snap tap pairs", keychron::SNAP_SLOTS.count()) };
-            keychron::he_set_snap(&self.raw, profile, slot, n.a, n.b, n.mode as u8)?;
+            keychron::he_set_snap(&self.raw, profile, slot, n.a, n.b, n.mode as u8).await?;
         }
-        keychron::he_save(&self.raw, profile)
+        keychron::he_save(&self.raw, profile).await
     }
 
-    fn set_he(&mut self, field: &str, v: i64) -> Result<()> {
+    async fn set_he(&mut self, field: &str, v: i64) -> Result<()> {
         let Some(he) = self.he.as_mut() else { bail!("no magnetic-switch data") };
         if field == "profile" {
-            keychron::he_select_profile(&self.raw, v as u8)?;
+            keychron::he_select_profile(&self.raw, v as u8).await?;
             he.current = v as u8;
             return Ok(());
         }
@@ -562,12 +568,12 @@ impl ViaKeyboard {
             "rt_release" => t.rt_release = v,
             _ => bail!("unknown setting he.{field}"),
         }
-        keychron::he_set_global(&self.raw, he.current, t)?;
+        keychron::he_set_global(&self.raw, he.current, t).await?;
         he.global = t;
         Ok(())
     }
 
-    fn set_sleep(&mut self, field: &str, v: i64) -> Result<()> {
+    async fn set_sleep(&mut self, field: &str, v: i64) -> Result<()> {
         let Some(mut s) = self.sleep else { bail!("sleep timers not supported") };
         let v = v.clamp(0, u16::MAX as i64) as u16;
         match field {
@@ -582,12 +588,12 @@ impl ViaKeyboard {
         if s.magnet_scan > 0 && (s.magnet_scan < s.backlight || (s.sleep > 0 && s.magnet_scan > s.sleep)) {
             bail!("switch scanning idle time must be between the backlight and sleep times");
         }
-        keychron::sleep_set(&self.raw, s)?;
+        keychron::sleep_set(&self.raw, s).await?;
         self.sleep = Some(s);
         Ok(())
     }
 
-    fn set_custom_value(&mut self, id: &str, value: &Value) -> Result<()> {
+    async fn set_custom_value(&mut self, id: &str, value: &Value) -> Result<()> {
         let Some(item) = self.menu.iter().find(|m| m.id() == id) else { bail!("unknown setting {id}") };
         let mut req = vec![cmd::CUSTOM_SET_VALUE, item.channel, item.value_id];
         match item.kind {
@@ -598,18 +604,19 @@ impl ViaKeyboard {
             _ if item.width() == 2 => req.extend((value.int()?.clamp(0, 0xFFFF) as u16).to_be_bytes()),
             _ => req.push(value.int()?.clamp(0, 255) as u8),
         }
-        self.raw.query(&req)?;
-        self.raw.try_query(&[cmd::CUSTOM_SAVE, item.channel])?;
+        self.raw.query(&req).await?;
+        self.raw.try_query(&[cmd::CUSTOM_SAVE, item.channel]).await?;
         Ok(())
     }
 }
 
+#[async_trait(?Send)]
 impl Device for ViaKeyboard {
     fn info(&self) -> &DeviceInfo {
         &self.info
     }
 
-    fn snapshot(&mut self) -> Result<Snapshot> {
+    async fn snapshot(&mut self) -> Result<Snapshot> {
         let mut out = Snapshot::default();
         if let Some(kc) = &self.kc {
             if let Some(fw) = &kc.firmware {
@@ -622,44 +629,43 @@ impl Device for ViaKeyboard {
         out.status.push(("VIA protocol".into(), self.protocol.to_string()));
         out.status.push(("Layers".into(), self.layers.to_string()));
         if self.def.is_none() {
-            let dir = definition::cache_dir();
             out.notice = Some(match &self.def_error {
                 Some(e) => format!("Keymap unavailable: {e}"),
                 None => format!(
                     "No layout definition for {:04x}:{:04x}. Put one in {} as {:04x}_{:04x}.json to edit the keymap.",
                     self.info.vid,
                     self.info.pid,
-                    dir.display(),
+                    definition::cache_location(),
                     self.info.vid,
                     self.info.pid
                 ),
             });
         }
-        if let Some(g) = self.he_group()? {
+        if let Some(g) = self.he_group().await? {
             out.groups.push(g);
         }
-        out.groups.extend(self.lighting()?);
+        out.groups.extend(self.lighting().await?);
         if self.kc.is_some() {
-            if let Some(g) = self.keyboard_group()? {
+            if let Some(g) = self.keyboard_group().await? {
                 out.groups.push(g);
             }
-            if let Some(g) = self.power_group()? {
+            if let Some(g) = self.power_group().await? {
                 out.groups.push(g);
             }
         }
-        if let Some(g) = self.macros_group()? {
+        if let Some(g) = self.macros_group().await? {
             out.groups.push(g);
         }
-        out.keymap = self.keymap()?;
+        out.keymap = self.keymap().await?;
         Ok(out)
     }
 
-    fn set(&mut self, id: &str, value: &Value) -> Result<()> {
+    async fn set(&mut self, id: &str, value: &Value) -> Result<()> {
         let (head, tail) = id.split_once('.').unwrap_or((id, ""));
         match head {
-            "via" => self.set_custom_value(id, value),
-            "he" => self.set_he(tail, value.int()?),
-            "sleep" => self.set_sleep(tail, value.int()?),
+            "via" => self.set_custom_value(id, value).await,
+            "he" => self.set_he(tail, value.int()?).await,
+            "sleep" => self.set_sleep(tail, value.int()?).await,
             "debounce" => {
                 let v = value.int()?.clamp(0, 255) as u8;
                 let d = match (self.debounce, tail) {
@@ -669,49 +675,49 @@ impl Device for ViaKeyboard {
                     (Some(Debounce::Telink { press, .. }), "release") => Debounce::Telink { press, release: v },
                     _ => bail!("unknown setting {id}"),
                 };
-                keychron::debounce_set(&self.raw, d)?;
+                keychron::debounce_set(&self.raw, d).await?;
                 self.debounce = Some(d);
                 Ok(())
             }
-            "poll" => keychron::poll_set(&self.raw, value.int()? as u32),
+            "poll" => keychron::poll_set(&self.raw, value.int()? as u32).await,
             "perf" => {
                 let Some((version, _)) = self.perf else { bail!("performance mode not supported") };
-                keychron::perf_set(&self.raw, version, value.int()? as u8)
+                keychron::perf_set(&self.raw, version, value.int()? as u8).await
             }
-            "nkro" => keychron::nkro_set(&self.raw, value.bool()?),
-            "dip" => keychron::dip_set(&self.raw, value.int()? as u8),
+            "nkro" => keychron::nkro_set(&self.raw, value.bool()?).await,
+            "dip" => keychron::dip_set(&self.raw, value.int()? as u8).await,
             "macro" => match value {
-                Value::Text(t) => self.set_macro(tail.parse()?, t),
+                Value::Text(t) => self.set_macro(tail.parse()?, t).await,
                 _ => bail!("a macro needs text"),
             },
             _ => bail!("unknown setting {id}"),
         }
     }
 
-    fn set_key_property(&mut self, id: &str, keys: &[(u8, u8)], value: Option<&Value>) -> Result<()> {
+    async fn set_key_property(&mut self, id: &str, keys: &[(u8, u8)], value: Option<&Value>) -> Result<()> {
         let Some(value) = value else {
             if id.starts_with("he.key.") {
-                return self.reset_key_travel(keys);
+                return self.reset_key_travel(keys).await;
             }
             bail!("this setting can't be reset per key");
         };
         match id.strip_prefix("he.key.") {
-            Some(field) => self.set_key_travel(field, keys, value.int()?),
-            None if id == "rgb.key.color" => self.set_key_colors(keys, value.color()?),
+            Some(field) => self.set_key_travel(field, keys, value.int()?).await,
+            None if id == "rgb.key.color" => self.set_key_colors(keys, value.color()?).await,
             None => bail!("unknown per-key setting {id}"),
         }
     }
 
-    fn set_key_pairs(&mut self, id: &str, pairs: &[KeyPair]) -> Result<()> {
+    async fn set_key_pairs(&mut self, id: &str, pairs: &[KeyPair]) -> Result<()> {
         match id {
-            "he.snap" => self.set_snap(pairs),
+            "he.snap" => self.set_snap(pairs).await,
             _ => bail!("unknown pair list {id}"),
         }
     }
 
-    fn set_key(&mut self, layer: u8, row: u8, col: u8, code: u16) -> Result<()> {
+    async fn set_key(&mut self, layer: u8, row: u8, col: u8, code: u16) -> Result<()> {
         let [hi, lo] = code.to_be_bytes();
-        let r = self.raw.query(&[cmd::SET_KEYCODE, layer, row, col, hi, lo])?;
+        let r = self.raw.query(&[cmd::SET_KEYCODE, layer, row, col, hi, lo]).await?;
         if r[4] != hi || r[5] != lo {
             bail!("keyboard did not accept the keycode");
         }

@@ -2,10 +2,10 @@
 //! 0xFF60 / usage 0x61. Every request is answered by a report that echoes the
 //! command byte (and, for grouped commands, the sub-command).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use hidapi::HidDevice;
+use hid_transport::{Device, Instant};
 
 pub const REPORT_LEN: usize = 32;
 const TIMEOUT: Duration = Duration::from_millis(300);
@@ -15,11 +15,11 @@ const UNHANDLED: u8 = 0xFF;
 pub type Report = [u8; REPORT_LEN];
 
 pub struct Raw {
-    dev: HidDevice,
+    dev: Device,
 }
 
 impl Raw {
-    pub fn new(dev: HidDevice) -> Self {
+    pub fn new(dev: Device) -> Self {
         Raw { dev }
     }
 
@@ -39,21 +39,21 @@ impl Raw {
         .min(req.len())
     }
 
-    fn write(&self, req: &[u8]) -> Result<()> {
+    async fn write(&self, req: &[u8]) -> Result<()> {
         if req.len() > REPORT_LEN {
             bail!("request too long");
         }
         let mut buf = [0u8; REPORT_LEN + 1];
         buf[1..1 + req.len()].copy_from_slice(req);
-        self.dev.write(&buf).context("HID write")?;
+        self.dev.write(&buf).await.context("HID write")?;
         Ok(())
     }
 
     /// Sends a request and waits for its reply. `None` means the firmware does
     /// not support it (no reply, or the "unhandled" marker).
-    pub fn try_query(&self, req: &[u8]) -> Result<Option<Report>> {
+    pub async fn try_query(&self, req: &[u8]) -> Result<Option<Report>> {
         let echo = Self::echo_len(req);
-        self.write(req)?;
+        self.write(req).await?;
         let deadline = Instant::now() + TIMEOUT;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
@@ -61,7 +61,7 @@ impl Raw {
                 return Ok(None);
             }
             let mut r = [0u8; 64];
-            let n = self.dev.read_timeout(&mut r, left.as_millis() as i32).context("HID read")?;
+            let n = self.dev.read_timeout(&mut r, left).await.context("HID read")?;
             if n < REPORT_LEN {
                 continue;
             }
@@ -75,9 +75,9 @@ impl Raw {
         }
     }
 
-    pub fn query(&self, req: &[u8]) -> Result<Report> {
+    pub async fn query(&self, req: &[u8]) -> Result<Report> {
         for _ in 0..3 {
-            if let Some(r) = self.try_query(req)? {
+            if let Some(r) = self.try_query(req).await? {
                 return Ok(r);
             }
         }
@@ -85,8 +85,8 @@ impl Raw {
     }
 
     /// Discards any pending input reports.
-    pub fn drain(&self) {
+    pub async fn drain(&self) {
         let mut r = [0u8; 64];
-        while matches!(self.dev.read_timeout(&mut r, 0), Ok(n) if n > 0) {}
+        while matches!(self.dev.read_timeout(&mut r, Duration::ZERO).await, Ok(n) if n > 0) {}
     }
 }

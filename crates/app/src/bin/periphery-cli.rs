@@ -1,8 +1,8 @@
 //! Command-line access to every supported device.
 
 use anyhow::{Context, Result, bail};
-use periphery_core::hidapi::HidApi;
 use periphery_core::backup::{self, Backup};
+use periphery_core::hid::Api;
 use periphery_core::{Device, Kind, Snapshot, Value, discover_all};
 
 const USAGE: &str = "usage:
@@ -17,12 +17,16 @@ const USAGE: &str = "usage:
   periphery-cli diag                                   (read-only protocol details for bug reports)";
 
 fn main() -> Result<()> {
+    pollster::block_on(run())
+}
+
+async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let api = HidApi::new()?;
+    let api = Api::new().await?;
     if args.first().map(String::as_str) == Some("diag") {
-        return diag(&api);
+        return diag(&api).await;
     }
-    let (mut devices, errors) = discover_all(&api, &periphery::drivers());
+    let (mut devices, errors) = discover_all(&api, &periphery::drivers()).await;
     for e in &errors {
         eprintln!("warning: {e}");
     }
@@ -45,21 +49,21 @@ fn main() -> Result<()> {
         }
         Some("show") => {
             let i = pick(&mut devices, args.get(1))?;
-            print_snapshot(&devices[i].snapshot()?);
+            print_snapshot(&devices[i].snapshot().await?);
         }
         Some("set") => {
             let i = pick(&mut devices, args.get(1))?;
             let (Some(id), Some(raw)) = (args.get(2), args.get(3)) else { bail!(USAGE) };
-            let snap = devices[i].snapshot()?;
+            let snap = devices[i].snapshot().await?;
             let Some(setting) = snap.find(id) else { bail!("unknown setting {id}") };
             let value = parse_value(&setting.kind, raw)?;
             setting.check(&value)?;
-            devices[i].set(id, &value)?;
+            devices[i].set(id, &value).await?;
             println!("ok");
         }
         Some("keymap") => {
             let i = pick(&mut devices, args.get(1))?;
-            let snap = devices[i].snapshot()?;
+            let snap = devices[i].snapshot().await?;
             let Some(km) = snap.keymap else { bail!("this device has no keymap") };
             let layer: usize = args.get(2).map_or(Ok(0), |s| s.parse())?;
             let Some(labels) = km.labels.get(layer) else { bail!("no layer {layer}") };
@@ -76,7 +80,7 @@ fn main() -> Result<()> {
             let nums: Vec<u8> = args[2..5.min(args.len())].iter().map(|s| s.parse()).collect::<Result<_, _>>()?;
             let [layer, row, col] = nums[..] else { bail!(USAGE) };
             let code = u16::from_str_radix(args.get(5).context(USAGE)?.trim_start_matches("0x"), 16)?;
-            devices[i].set_key(layer, row, col, code)?;
+            devices[i].set_key(layer, row, col, code).await?;
             println!("ok");
         }
         Some("setprop") => {
@@ -92,18 +96,18 @@ fn main() -> Result<()> {
             if keys.is_empty() {
                 bail!("give at least one row,col");
             }
-            let snap = devices[i].snapshot()?;
+            let snap = devices[i].snapshot().await?;
             let Some(prop) = snap.keymap.as_ref().and_then(|k| k.properties.iter().find(|p| p.id == *id)) else {
                 bail!("unknown per-key setting {id}");
             };
             let value = if raw == "default" { None } else { Some(parse_value(&prop.kind, raw)?) };
-            devices[i].set_key_property(id, &keys, value.as_ref())?;
+            devices[i].set_key_property(id, &keys, value.as_ref()).await?;
             println!("ok");
         }
         Some("backup") => {
             let i = pick(&mut devices, args.get(1))?;
             let file = args.get(2).context(USAGE)?;
-            let b = Backup::capture(devices[i].as_mut())?;
+            let b = Backup::capture(devices[i].as_mut()).await?;
             std::fs::write(file, b.to_json())?;
             println!("saved {} settings, {} keymap layers, {} per-key settings, {} pair lists to {file}", b.settings.len(), b.keymap.as_ref().map_or(0, Vec::len), b.key_properties.len(), b.pairs.len());
         }
@@ -112,7 +116,7 @@ fn main() -> Result<()> {
             let file = args.get(2).context(USAGE)?;
             let dry = args.iter().any(|a| a == "--dry-run");
             let b = Backup::from_json(&std::fs::read_to_string(file)?)?;
-            let r = backup::restore(devices[i].as_mut(), &b, dry)?;
+            let r = backup::restore(devices[i].as_mut(), &b, dry).await?;
             let verb = if dry { "would change" } else { "changed" };
             println!("{verb} {} value(s)", r.applied.len());
             for a in &r.applied {
@@ -207,17 +211,17 @@ fn print_snapshot(s: &Snapshot) {
 }
 
 /// Read-only protocol details to paste into bug reports.
-fn diag(api: &HidApi) -> Result<()> {
+async fn diag(api: &Api) -> Result<()> {
     println!("periphery {}", env!("CARGO_PKG_VERSION"));
-    for d in api.device_list() {
-        if matches!(d.vendor_id(), 0x046D | 0x3151 | 0x3434 | 0x3554) {
+    for d in api.devices() {
+        if matches!(d.vendor_id, 0x046D | 0x3151 | 0x3434 | 0x3554) {
             println!(
                 "hid {:04x}:{:04x} if={} page={:04x} usage={:04x} {:?}",
-                d.vendor_id(), d.product_id(), d.interface_number(), d.usage_page(), d.usage(), d.product_string()
+                d.vendor_id, d.product_id, d.interface_number, d.usage_page, d.usage, d.product
             );
         }
     }
-    for dev in logitech_hidpp::discover(api) {
+    for dev in logitech_hidpp::discover(api).await {
         let mut dev = match dev {
             Ok(d) => d,
             Err(e) => {
@@ -231,25 +235,25 @@ logitech index {:#04x} on {:04x}, HID++ {}.{}", dev.index, dev.product_id, dev.p
             Ok(v) => println!("  {label:<14} {v}"),
             Err(e) => println!("  {label:<14} ERROR {e:#}"),
         };
-        show("name", dev.name());
-        show("firmware", dev.firmware().map(|f| format!("{f:?}")));
-        show("battery", dev.battery().map(|b| format!("{b:?}")));
-        show("dpi range", dev.dpi_info().map(|d| format!("{d:?}")));
-        show("dpi", dev.dpi().map(|d| d.to_string()));
-        show("rates (Hz)", dev.report_rates().map(|r| format!("{r:?}")));
-        show("rate (Hz)", dev.report_rate().map(|r| r.to_string()));
-        show("profile ms", dev.report_intervals().map(|r| format!("{r:?}")));
-        match dev.onboard_info() {
+        show("name", dev.name().await);
+        show("firmware", dev.firmware().await.map(|f| format!("{f:?}")));
+        show("battery", dev.battery().await.map(|b| format!("{b:?}")));
+        show("dpi range", dev.dpi_info().await.map(|d| format!("{d:?}")));
+        show("dpi", dev.dpi().await.map(|d| d.to_string()));
+        show("rates (Hz)", dev.report_rates().await.map(|r| format!("{r:?}")));
+        show("rate (Hz)", dev.report_rate().await.map(|r| r.to_string()));
+        show("profile ms", dev.report_intervals().await.map(|r| format!("{r:?}")));
+        match dev.onboard_info().await {
             Ok(Some(info)) => {
                 show("onboard", Ok(format!("{info:?}")));
-                show("mode", dev.mode().map(|m| format!("{m:?}")));
-                show("current", dev.current_profile().map(|p| format!("{p:#06x}")));
-                show("directory", dev.profile_directory(&info).map(|d| format!("{d:x?}")));
+                show("mode", dev.mode().await.map(|m| format!("{m:?}")));
+                show("current", dev.current_profile().await.map(|p| format!("{p:#06x}")));
+                show("directory", dev.profile_directory(&info).await.map(|d| format!("{d:x?}")));
             }
             Ok(None) => println!("  onboard        none"),
             Err(e) => println!("  onboard        ERROR {e:#}"),
         }
-        match dev.feature_list() {
+        match dev.feature_list().await {
             Ok(list) => {
                 println!("  features:");
                 for (i, id, flags, ver) in list {
@@ -259,7 +263,7 @@ logitech index {:#04x} on {:04x}, HID++ {}.{}", dev.index, dev.product_id, dev.p
             Err(e) => println!("  features       ERROR {e:#}"),
         }
     }
-    for line in periphery_rongyuan::diag(api) {
+    for line in periphery_rongyuan::diag(api).await {
         println!("{line}");
     }
     Ok(())

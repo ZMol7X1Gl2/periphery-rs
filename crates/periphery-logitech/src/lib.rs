@@ -4,21 +4,30 @@
 use anyhow::{Result, bail};
 use logitech_hidpp::profile::{Binding, DPI_STAGES, NAME_LEN, Profile, special};
 use logitech_hidpp::{Charging, Device as Hidpp, DpiInfo, Mode, OnboardInfo, ROM_BASE};
-use periphery_core::hidapi::HidApi;
-use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Setting, Snapshot, Value};
+use periphery_core::hid::{Api, Filter};
+use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Setting, Snapshot, Value, async_trait};
 
 pub struct LogitechDriver;
 
+#[async_trait(?Send)]
 impl Driver for LogitechDriver {
     fn name(&self) -> &'static str {
         "logitech-hidpp"
     }
 
-    fn discover(&self, api: &HidApi) -> Vec<Result<Box<dyn Device>>> {
-        logitech_hidpp::discover(api)
-            .into_iter()
-            .map(|r| r.and_then(|d| Ok(Box::new(LogitechMouse::new(d)?) as Box<dyn Device>)))
-            .collect()
+    fn filters(&self) -> Vec<Filter> {
+        vec![logitech_hidpp::FILTER]
+    }
+
+    async fn discover(&self, api: &Api) -> Vec<Result<Box<dyn Device>>> {
+        let mut out = Vec::new();
+        for r in logitech_hidpp::discover(api).await {
+            out.push(match r {
+                Ok(d) => LogitechMouse::new(d).await.map(|m| Box::new(m) as Box<dyn Device>),
+                Err(e) => Err(e),
+            });
+        }
+        out
     }
 }
 
@@ -68,9 +77,9 @@ fn binding_choice(b: Binding) -> (i64, Option<String>) {
 }
 
 impl LogitechMouse {
-    fn new(mut dev: Hidpp) -> Result<Self> {
-        let model = dev.name().unwrap_or_else(|_| format!("device {:04x}", dev.product_id));
-        let onboard = dev.onboard_info()?;
+    async fn new(mut dev: Hidpp) -> Result<Self> {
+        let model = dev.name().await.unwrap_or_else(|_| format!("device {:04x}", dev.product_id));
+        let onboard = dev.onboard_info().await?;
         let info = DeviceInfo {
             brand: "Logitech".into(),
             model,
@@ -94,8 +103,8 @@ impl LogitechMouse {
     }
 
     /// Reads a profile sector; factory (ROM) copies carry no valid CRC.
-    fn load_profile(&mut self, info: &OnboardInfo, sector: u16) -> Result<Profile> {
-        let raw = self.dev.read_sector(sector, info.sector_size)?;
+    async fn load_profile(&mut self, info: &OnboardInfo, sector: u16) -> Result<Profile> {
+        let raw = self.dev.read_sector(sector, info.sector_size).await?;
         if sector & ROM_BASE != 0 { Profile::from_rom(raw, info.button_count) } else { Profile::parse(raw, info.button_count) }
     }
 
@@ -105,30 +114,30 @@ impl LogitechMouse {
 
     /// Applies `edit` to the edited profile, writes it, verifies it and makes
     /// the mouse reload it when it's the active one.
-    fn edit_profile(&mut self, edit: impl FnOnce(&mut Profile) -> Result<()>) -> Result<()> {
+    async fn edit_profile(&mut self, edit: impl FnOnce(&mut Profile) -> Result<()>) -> Result<()> {
         let (Some(info), Some(sector)) = (self.onboard, self.edit_sector) else { bail!("no onboard profile loaded") };
         if sector & ROM_BASE != 0 {
             bail!("this is the mouse's factory profile, which is read-only; save a profile with G HUB once to create editable copies");
         }
-        let mut p = Profile::parse(self.dev.read_sector(sector, info.sector_size)?, info.button_count)?;
+        let mut p = Profile::parse(self.dev.read_sector(sector, info.sector_size).await?, info.button_count)?;
         edit(&mut p)?;
         let bytes = p.encode();
-        self.dev.write_sector(sector, &bytes)?;
-        if self.dev.read_sector(sector, info.sector_size)? != bytes {
+        self.dev.write_sector(sector, &bytes).await?;
+        if self.dev.read_sector(sector, info.sector_size).await? != bytes {
             bail!("profile verification failed after writing");
         }
-        if self.dev.mode()? == Mode::Onboard && self.dev.current_profile()? == sector {
-            self.dev.set_current_profile(sector)?;
+        if self.dev.mode().await? == Mode::Onboard && self.dev.current_profile().await? == sector {
+            self.dev.set_current_profile(sector).await?;
         }
         self.profile = Some(p);
         Ok(())
     }
 
-    fn profile_groups(&mut self, out: &mut Snapshot, dpi: Option<&DpiInfo>, intervals: &[u8], mode: Mode) -> Result<()> {
+    async fn profile_groups(&mut self, out: &mut Snapshot, dpi: Option<&DpiInfo>, intervals: &[u8], mode: Mode) -> Result<()> {
         let Some(info) = self.onboard else { return Ok(()) };
-        let dir = self.dev.profile_directory(&info)?;
+        let dir = self.dev.profile_directory(&info).await?;
         let enabled: Vec<u16> = dir.iter().filter(|(_, on)| *on).map(|(s, _)| *s).collect();
-        let current = self.dev.current_profile()?;
+        let current = self.dev.current_profile().await?;
         let sector = match self.edit_sector {
             Some(s) if enabled.contains(&s) => s,
             _ if enabled.contains(&current) => current,
@@ -140,7 +149,7 @@ impl LogitechMouse {
         self.edit_sector = Some(sector);
         let mut names = Vec::new();
         for s in &enabled {
-            let p = self.load_profile(&info, *s)?;
+            let p = self.load_profile(&info, *s).await?;
             names.push((*s as i64, format!("Profile {s}: {}", p.name())));
             if *s == sector {
                 self.profile = Some(p);
@@ -213,19 +222,20 @@ impl LogitechMouse {
     }
 }
 
+#[async_trait(?Send)]
 impl Device for LogitechMouse {
     fn info(&self) -> &DeviceInfo {
         &self.info
     }
 
-    fn snapshot(&mut self) -> Result<Snapshot> {
+    async fn snapshot(&mut self) -> Result<Snapshot> {
         let mut out = Snapshot::default();
         let via = if self.dev.index == 0xFF { "USB / direct" } else { "Wireless receiver" };
         out.status.push(("Connection".into(), via.into()));
-        if let Some(fw) = self.dev.firmware()? {
+        if let Some(fw) = self.dev.firmware().await? {
             out.status.push(("Firmware".into(), fw));
         }
-        if let Some(b) = self.dev.battery()? {
+        if let Some(b) = self.dev.battery().await? {
             let state = match b.charging {
                 Charging::Discharging => "",
                 Charging::Charging => " charging",
@@ -236,10 +246,10 @@ impl Device for LogitechMouse {
             out.status.push(("Battery".into(), format!("{pct}{state}")));
         }
         // A failing optional read shouldn't hide everything else (incl. mode).
-        let dpi = self.dev.dpi_info().unwrap_or(None);
-        let intervals = self.dev.report_intervals().unwrap_or(None).unwrap_or_default();
-        let rates = self.dev.report_rates().unwrap_or(None).unwrap_or_default();
-        let mode = if self.onboard.is_some() { self.dev.mode()? } else { Mode::Host };
+        let dpi = self.dev.dpi_info().await.unwrap_or(None);
+        let intervals = self.dev.report_intervals().await.unwrap_or(None).unwrap_or_default();
+        let rates = self.dev.report_rates().await.unwrap_or(None).unwrap_or_default();
+        let mode = if self.onboard.is_some() { self.dev.mode().await? } else { Mode::Host };
 
         if self.onboard.is_some() {
             let mut g = Group::new("Mode");
@@ -258,12 +268,12 @@ impl Device for LogitechMouse {
             let mut g = Group::new("Live settings");
             if let Some(d) = &dpi {
                 g.push(
-                    Setting::new("live.dpi", "DPI", Self::dpi_kind(d), Value::Int(self.dev.dpi()? as i64))
+                    Setting::new("live.dpi", "DPI", Self::dpi_kind(d), Value::Int(self.dev.dpi().await? as i64))
                         .help("Applies immediately but isn't stored on the mouse"),
                 );
             }
             if !rates.is_empty() {
-                g.push(Setting::new("live.rate", "Polling rate", Self::hz_kind(&rates), Value::Int(self.dev.report_rate()? as i64)));
+                g.push(Setting::new("live.rate", "Polling rate", Self::hz_kind(&rates), Value::Int(self.dev.report_rate().await? as i64)));
             }
             if g.settings.is_empty() {
                 g.push(
@@ -273,67 +283,67 @@ impl Device for LogitechMouse {
             }
             out.groups.push(g);
         }
-        self.profile_groups(&mut out, dpi.as_ref(), &intervals, mode)?;
+        self.profile_groups(&mut out, dpi.as_ref(), &intervals, mode).await?;
         Ok(out)
     }
 
-    fn set(&mut self, id: &str, value: &Value) -> Result<()> {
+    async fn set(&mut self, id: &str, value: &Value) -> Result<()> {
         let (head, tail) = id.rsplit_once('.').map_or((id, ""), |(h, t)| (h, t));
         match (head, tail) {
             ("mode", _) => {
                 let mode = if value.int()? == Mode::Onboard as i64 { Mode::Onboard } else { Mode::Host };
-                self.dev.set_mode(mode)?;
+                self.dev.set_mode(mode).await?;
                 if mode == Mode::Onboard {
                     if let Some(s) = self.edit_sector {
-                        self.dev.set_current_profile(s)?;
+                        self.dev.set_current_profile(s).await?;
                     }
                 }
                 Ok(())
             }
-            ("live", "dpi") => self.dev.set_dpi(value.int()? as u16),
-            ("live", "rate") => self.dev.set_report_rate(value.int()? as u32),
+            ("live", "dpi") => self.dev.set_dpi(value.int()? as u16).await,
+            ("live", "rate") => self.dev.set_report_rate(value.int()? as u32).await,
             ("onboard", "profile") => {
                 let s = value.int()? as u16;
                 self.edit_sector = Some(s);
-                if self.dev.mode()? == Mode::Onboard {
-                    self.dev.set_current_profile(s)?;
+                if self.dev.mode().await? == Mode::Onboard {
+                    self.dev.set_current_profile(s).await?;
                 }
                 Ok(())
             }
             ("p", "name") => match value {
-                Value::Text(t) => self.edit_profile(|p| Ok(p.set_name(t))),
+                Value::Text(t) => self.edit_profile(|p| Ok(p.set_name(t))).await,
                 _ => bail!("name must be text"),
             },
             ("p", "rate") => {
                 let ms = value.int()? as u8;
-                self.edit_profile(|p| Ok(p.set_report_interval(ms)))
+                self.edit_profile(|p| Ok(p.set_report_interval(ms))).await
             }
             ("p", "default") => {
                 let i = value.int()? as u8;
-                self.edit_profile(|p| Ok(p.set_default_dpi_stage(i)))
+                self.edit_profile(|p| Ok(p.set_default_dpi_stage(i))).await
             }
             ("p", "shift") => {
                 let i = value.int()? as u8;
-                self.edit_profile(|p| Ok(p.set_shift_dpi_stage(i)))
+                self.edit_profile(|p| Ok(p.set_shift_dpi_stage(i))).await
             }
             ("p", "factory") => {
                 let (Some(info), Some(sector)) = (self.onboard, self.edit_sector) else { bail!("no profile") };
-                let rom = self.dev.read_sector(ROM_BASE + sector, info.sector_size)?;
+                let rom = self.dev.read_sector(ROM_BASE + sector, info.sector_size).await?;
                 let factory = Profile::from_rom(rom, info.button_count)?;
                 self.edit_profile(|p| {
                     *p = factory;
                     Ok(())
-                })
+                }).await
             }
             ("p.dpi", stage) => {
                 let stage: usize = stage.parse()?;
                 let dpi = value.int()? as u16;
-                if let Some(d) = self.dev.dpi_info()? {
+                if let Some(d) = self.dev.dpi_info().await? {
                     if dpi < d.min || dpi > d.max {
                         bail!("DPI must be {}-{}", d.min, d.max);
                     }
                 }
-                self.edit_profile(|p| Ok(p.set_dpi(stage, dpi)))
+                self.edit_profile(|p| Ok(p.set_dpi(stage, dpi))).await
             }
             ("p.button", i) => {
                 let i: usize = i.parse()?;
@@ -343,13 +353,13 @@ impl Device for LogitechMouse {
                     v if v >= SPECIAL_BASE => Binding::Special((v - SPECIAL_BASE) as u8),
                     v => Binding::Mouse(v as u16),
                 };
-                self.edit_profile(|p| Ok(p.set_button(i, binding)))
+                self.edit_profile(|p| Ok(p.set_button(i, binding))).await
             }
             _ => bail!("unknown setting {id}"),
         }
     }
 
-    fn poll_changes(&mut self) -> Result<bool> {
-        Ok(self.dev.poll_notifications())
+    async fn poll_changes(&mut self) -> Result<bool> {
+        Ok(self.dev.poll_notifications().await)
     }
 }

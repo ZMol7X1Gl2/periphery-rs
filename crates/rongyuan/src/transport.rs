@@ -27,11 +27,10 @@
 //! `F7` until "reply waiting", send `FC`, then get the feature report.
 
 use std::cell::Cell;
-use std::thread::sleep;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use hidapi::HidDevice;
+use hid_transport::{Device, sleep};
 
 pub const REPORT_LEN: usize = 64;
 pub type Report = [u8; REPORT_LEN];
@@ -88,13 +87,13 @@ impl MouseStatus {
 }
 
 pub struct Link {
-    dev: HidDevice,
+    dev: Device,
     receiver: bool,
     routed: Cell<bool>,
 }
 
 impl Link {
-    pub fn new(dev: HidDevice, receiver: bool) -> Self {
+    pub fn new(dev: Device, receiver: bool) -> Self {
         Link { dev, receiver, routed: Cell::new(false) }
     }
 
@@ -102,15 +101,15 @@ impl Link {
         self.receiver
     }
 
-    fn set_feature(&self, data: &[u8]) -> Result<()> {
+    async fn set_feature(&self, data: &[u8]) -> Result<()> {
         let mut buf = [0u8; REPORT_LEN + 1];
         buf[1..1 + data.len()].copy_from_slice(data);
-        self.dev.send_feature_report(&buf).context("HID set feature report")
+        self.dev.send_feature_report(&buf).await.context("HID set feature report")
     }
 
-    fn get_feature(&self) -> Result<Report> {
+    async fn get_feature(&self) -> Result<Report> {
         let mut buf = [0u8; REPORT_LEN + 1];
-        let n = self.dev.get_feature_report(&mut buf).context("HID get feature report")?;
+        let n = self.dev.get_feature_report(&mut buf).await.context("HID get feature report")?;
         if n < 2 {
             bail!("empty feature report");
         }
@@ -121,17 +120,17 @@ impl Link {
     }
 
     /// Receiver status (`F7`). Only valid on a receiver.
-    pub fn receiver_status(&self) -> Result<MouseStatus> {
-        sleep(SEND_DELAY);
-        self.set_feature(&[receiver_cmd::STATUS])?;
-        sleep(READ_DELAY);
-        Ok(MouseStatus::parse(&self.get_feature()?))
+    pub async fn receiver_status(&self) -> Result<MouseStatus> {
+        sleep(SEND_DELAY).await;
+        self.set_feature(&[receiver_cmd::STATUS]).await?;
+        sleep(READ_DELAY).await;
+        Ok(MouseStatus::parse(&self.get_feature().await?))
     }
 
-    fn wait_receiver(&self, ready: impl Fn(&MouseStatus) -> bool, what: &str) -> Result<()> {
+    async fn wait_receiver(&self, ready: impl Fn(&MouseStatus) -> bool, what: &str) -> Result<()> {
         for _ in 0..POLLS {
-            sleep(POLL_DELAY);
-            let s = self.receiver_status()?;
+            sleep(POLL_DELAY).await;
+            let s = self.receiver_status().await?;
             if !s.online {
                 bail!("the mouse is asleep or switched off — move it to wake it up");
             }
@@ -143,40 +142,40 @@ impl Link {
     }
 
     /// Sends a framed command (to the mouse, through the receiver if needed).
-    pub fn send(&self, report: &Report) -> Result<()> {
+    pub async fn send(&self, report: &Report) -> Result<()> {
         if self.receiver {
-            self.wait_receiver(|s| s.can_send, "ready to send")?;
+            self.wait_receiver(|s| s.can_send, "ready to send").await?;
             if !self.routed.get() {
-                sleep(SEND_DELAY);
-                self.set_feature(&[receiver_cmd::ROUTE, receiver_cmd::ROUTE_MOUSE])?;
+                sleep(SEND_DELAY).await;
+                self.set_feature(&[receiver_cmd::ROUTE, receiver_cmd::ROUTE_MOUSE]).await?;
                 self.routed.set(true);
             }
         }
-        sleep(SEND_DELAY);
-        self.set_feature(report)
+        sleep(SEND_DELAY).await;
+        self.set_feature(report).await
     }
 
     /// Fetches the reply to the last command.
-    pub fn read(&self) -> Result<Report> {
+    pub async fn read(&self) -> Result<Report> {
         if self.receiver {
-            self.wait_receiver(|s| s.can_read, "a reply from the mouse")?;
-            sleep(SEND_DELAY);
-            self.set_feature(&[receiver_cmd::FETCH])?;
+            self.wait_receiver(|s| s.can_read, "a reply from the mouse").await?;
+            sleep(SEND_DELAY).await;
+            self.set_feature(&[receiver_cmd::FETCH]).await?;
         }
-        sleep(READ_DELAY);
-        self.get_feature()
+        sleep(READ_DELAY).await;
+        self.get_feature().await
     }
 
     /// Sends `cmd` (framed with its checksum) and returns the reply.
-    pub fn query(&self, cmd: &[u8]) -> Result<Report> {
-        self.send(&frame(cmd))?;
-        self.read()
+    pub async fn query(&self, cmd: &[u8]) -> Result<Report> {
+        self.send(&frame(cmd)).await?;
+        self.read().await
     }
 
     /// Like [`Link::query`], but requires the reply to echo the command byte.
-    pub fn query_echo(&self, cmd: &[u8]) -> Result<Report> {
+    pub async fn query_echo(&self, cmd: &[u8]) -> Result<Report> {
         for _ in 0..3 {
-            let r = self.query(cmd)?;
+            let r = self.query(cmd).await?;
             if r[0] == cmd[0] {
                 return Ok(r);
             }

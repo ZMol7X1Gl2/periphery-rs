@@ -14,11 +14,10 @@
 //! and sends it back with command `53`. Profile changes are made the same
 //! way (byte 8), not with the generic `05` command.
 
-use std::thread::sleep;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
-use hidapi::{DeviceInfo, HidApi};
+use hid_transport::{Api, DeviceInfo, Filter, sleep};
 
 use crate::models::{self, Model};
 use crate::transport::{Link, MouseStatus, REPORT_LEN, Report, checksum, frame};
@@ -268,32 +267,34 @@ pub struct Mouse {
 }
 
 impl Mouse {
+    /// The vendor collection of every supported wired mouse and receiver.
+    pub const FILTER: Filter =
+        Filter { vendor_id: Some(models::VENDOR_ID), product_id: None, usage_page: Some(models::USAGE_PAGE), usage: Some(models::USAGE) };
+
     /// The vendor collection of a supported wired mouse or receiver.
-    pub fn candidates(api: &HidApi) -> impl Iterator<Item = &DeviceInfo> {
-        api.device_list().filter(|d| {
-            d.vendor_id() == models::VENDOR_ID
-                && d.usage_page() == models::USAGE_PAGE
-                && d.usage() == models::USAGE
-                && (models::MOUSE_PIDS.contains(&d.product_id()) || models::receiver_max_rate(d.product_id()).is_some())
+    pub fn candidates(api: &Api) -> impl Iterator<Item = &DeviceInfo> {
+        api.devices().filter(|d| {
+            Self::FILTER.matches(d)
+                && (models::MOUSE_PIDS.contains(&d.product_id) || models::receiver_max_rate(d.product_id).is_some())
         })
     }
 
     /// Opens a candidate. Returns `None` for a receiver without a mouse.
-    pub fn open(api: &HidApi, info: &DeviceInfo) -> Result<Option<Mouse>> {
-        let pid = info.product_id();
+    pub async fn open(api: &Api, info: &DeviceInfo) -> Result<Option<Mouse>> {
+        let pid = info.product_id;
         let receiver = models::receiver_max_rate(pid);
-        let link = Link::new(info.open_device(api)?, receiver.is_some());
+        let link = Link::new(api.open(info).await?, receiver.is_some());
         let mut mouse = Mouse { link, id: None, product_id: pid, max_rate: receiver.unwrap_or(1000) };
         if mouse.link.is_receiver() {
-            let s = mouse.link.receiver_status()?;
+            let s = mouse.link.receiver_status().await?;
             if !s.paired {
                 return Ok(None);
             }
             if s.online {
-                mouse.id = Some(mouse.read_id()?);
+                mouse.id = Some(mouse.read_id().await?);
             }
         } else {
-            mouse.id = Some(mouse.read_id()?);
+            mouse.id = Some(mouse.read_id().await?);
         }
         Ok(Some(mouse))
     }
@@ -302,8 +303,8 @@ impl Mouse {
         self.link.is_receiver()
     }
 
-    fn read_id(&self) -> Result<u32> {
-        let r = self.link.query_echo(&[cmd::GET_INFO])?;
+    async fn read_id(&self) -> Result<u32> {
+        let r = self.link.query_echo(&[cmd::GET_INFO]).await?;
         let id = u32::from_le_bytes(r[1..5].try_into().unwrap());
         if id == u32::MAX {
             bail!("the mouse is in firmware-update mode");
@@ -316,68 +317,68 @@ impl Mouse {
     }
 
     /// Receiver status (`None` when wired).
-    pub fn status(&self) -> Result<Option<MouseStatus>> {
+    pub async fn status(&self) -> Result<Option<MouseStatus>> {
         if !self.link.is_receiver() {
             return Ok(None);
         }
-        self.link.receiver_status().map(Some)
+        self.link.receiver_status().await.map(Some)
     }
 
     /// Reads the model id if it isn't known yet (a mouse that woke up).
-    pub fn identify(&mut self) -> Result<Option<u32>> {
-        if self.id.is_none() && self.status()?.is_none_or(|s| s.online) {
-            self.id = Some(self.read_id()?);
+    pub async fn identify(&mut self) -> Result<Option<u32>> {
+        if self.id.is_none() && self.status().await?.is_none_or(|s| s.online) {
+            self.id = Some(self.read_id().await?);
         }
         Ok(self.id)
     }
 
-    pub fn firmware(&self) -> Result<u16> {
+    pub async fn firmware(&self) -> Result<u16> {
         let c = self.model().map_or(cmd::GET_VERSION, |m| m.version_cmd);
-        let r = self.link.query_echo(&[c])?;
+        let r = self.link.query_echo(&[c]).await?;
         Ok(u16::from_le_bytes([r[1], r[2]]))
     }
 
-    pub fn options(&self) -> Result<Options> {
-        Ok(Options { raw: self.link.query_echo(&[cmd::GET_OPTIONS])? })
+    pub async fn options(&self) -> Result<Options> {
+        Ok(Options { raw: self.link.query_echo(&[cmd::GET_OPTIONS]).await? })
     }
 
     /// Writes the option block and checks that `check` reads back the same.
-    pub fn set_options<T: PartialEq + std::fmt::Debug>(&self, o: &Options, check: impl Fn(&Options) -> T) -> Result<()> {
-        self.link.send(&o.to_write())?;
-        sleep(WRITE_SETTLE);
-        let back = self.options()?;
+    pub async fn set_options<T: PartialEq + std::fmt::Debug>(&self, o: &Options, check: impl Fn(&Options) -> T) -> Result<()> {
+        self.link.send(&o.to_write()).await?;
+        sleep(WRITE_SETTLE).await;
+        let back = self.options().await?;
         if check(&back) != check(o) {
             bail!("the mouse did not keep the change (reads back {:?})", check(&back));
         }
         Ok(())
     }
 
-    pub fn dpi(&self, profile: u8) -> Result<DpiTable> {
-        Ok(DpiTable::parse(&self.link.query_echo(&[cmd::GET_DPI, profile])?))
+    pub async fn dpi(&self, profile: u8) -> Result<DpiTable> {
+        Ok(DpiTable::parse(&self.link.query_echo(&[cmd::GET_DPI, profile]).await?))
     }
 
-    pub fn set_dpi(&self, profile: u8, t: &DpiTable) -> Result<()> {
+    pub async fn set_dpi(&self, profile: u8, t: &DpiTable) -> Result<()> {
         if t.stages.is_empty() || t.stages.len() > MAX_STAGES {
             bail!("1 to {MAX_STAGES} DPI stages");
         }
-        self.link.send(&t.to_write(profile))?;
-        sleep(WRITE_SETTLE);
-        let back = self.dpi(profile)?;
+        self.link.send(&t.to_write(profile)).await?;
+        sleep(WRITE_SETTLE).await;
+        let back = self.dpi(profile).await?;
         if &back != t {
             bail!("the mouse did not keep the DPI change");
         }
         Ok(())
     }
 
-    pub fn buttons_raw(&self, profile: u8) -> Result<Report> {
-        self.link.query(&[cmd::GET_KEYS, profile])
+    pub async fn buttons_raw(&self, profile: u8) -> Result<Report> {
+        self.link.query(&[cmd::GET_KEYS, profile]).await
     }
 
-    pub fn buttons(&self, profile: u8) -> Result<[Action; BUTTONS.len()]> {
-        Ok(parse_buttons(&self.buttons_raw(profile)?))
+    pub async fn buttons(&self, profile: u8) -> Result<[Action; BUTTONS.len()]> {
+        Ok(parse_buttons(&self.buttons_raw(profile).await?))
     }
 
-    pub fn set_button(&self, profile: u8, slot: u8, action: Action) -> Result<()> {
+    pub async fn set_button(&self, profile: u8, slot: u8, action: Action) -> Result<()> {
         if slot as usize >= BUTTONS.len() {
             bail!("no button {slot}");
         }
@@ -386,14 +387,14 @@ impl Mouse {
         c[1] = profile;
         c[2] = slot;
         c[8..12].copy_from_slice(&action);
-        self.link.send(&frame(&c))?;
-        sleep(WRITE_SETTLE);
+        self.link.send(&frame(&c)).await?;
+        sleep(WRITE_SETTLE).await;
         Ok(())
     }
 
-    pub fn factory_reset(&self) -> Result<()> {
-        self.link.send(&frame(&[cmd::RESET]))?;
-        sleep(WRITE_SETTLE);
+    pub async fn factory_reset(&self) -> Result<()> {
+        self.link.send(&frame(&[cmd::RESET])).await?;
+        sleep(WRITE_SETTLE).await;
         Ok(())
     }
 }

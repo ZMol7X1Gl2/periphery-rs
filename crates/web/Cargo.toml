@@ -1,0 +1,18 @@
+[package]
+name = "periphery-web"
+description = "Periphery in the browser over WebHID (Chrome, Edge, Opera)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+periphery = { path = "../app" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+eframe = "0.29.1"
+log = "0.4.34"
+wasm-bindgen = "0.2.129"
+wasm-bindgen-futures = "0.4.79"
+web-sys = { version = "0.3.106", features = ["Document", "Element", "HtmlCanvasElement", "Window"] }

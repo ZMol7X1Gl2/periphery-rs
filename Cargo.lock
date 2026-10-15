@@ -1147,12 +1147,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "futures"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a31d2a3fbaaeb2af2368bbdd904aa8e812d3c04a1ee10d3171f52d556e5d0a3"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "futures-executor",
+ "futures-io",
+ "futures-sink",
+ "futures-task",
+ "futures-util",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1f9e3d69d39e4862ffed03ed071a76f9a13ba1d9109d355b0f0aa6b15e393c4"
 dependencies = [
  "futures-core",
+ "futures-sink",
 ]
 
 [[package]]
@@ -1160,6 +1176,17 @@ name = "futures-core"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e"
+
+[[package]]
+name = "futures-executor"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "031b47cf1a3c6cc8bc2fc76cd437f521619387907d469316e7c0bc278f1f5432"
+dependencies = [
+ "futures-core",
+ "futures-task",
+ "futures-util",
+]
 
 [[package]]
 name = "futures-io"
@@ -1209,6 +1236,7 @@ version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc"
 dependencies = [
+ "futures-channel",
  "futures-core",
  "futures-io",
  "futures-macro",
@@ -1473,6 +1501,20 @@ name = "hexf-parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
+
+[[package]]
+name = "hid-transport"
+version = "0.1.1-rc.2"
+dependencies = [
+ "anyhow",
+ "futures",
+ "hidapi",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
+]
 
 [[package]]
 name = "hidapi"
@@ -1797,7 +1839,7 @@ name = "logitech-hidpp"
 version = "0.1.1-rc.2"
 dependencies = [
  "anyhow",
- "hidapi",
+ "hid-transport",
 ]
 
 [[package]]
@@ -2370,13 +2412,19 @@ version = "0.1.1-rc.2"
 dependencies = [
  "anyhow",
  "eframe",
+ "futures",
+ "js-sys",
  "logitech-hidpp",
  "periphery-core",
  "periphery-logitech",
  "periphery-rongyuan",
  "periphery-scyrox",
  "periphery-via",
+ "pollster",
  "rfd",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -2384,7 +2432,9 @@ name = "periphery-core"
 version = "0.1.1-rc.2"
 dependencies = [
  "anyhow",
- "hidapi",
+ "async-trait",
+ "hid-transport",
+ "pollster",
  "serde",
  "serde_json",
 ]
@@ -2423,6 +2473,18 @@ dependencies = [
  "anyhow",
  "periphery-core",
  "qmk-via",
+]
+
+[[package]]
+name = "periphery-web"
+version = "0.1.1-rc.2"
+dependencies = [
+ "eframe",
+ "log",
+ "periphery",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -2566,10 +2628,13 @@ name = "qmk-via"
 version = "0.1.1-rc.2"
 dependencies = [
  "anyhow",
- "hidapi",
+ "hid-transport",
  "serde",
  "serde_json",
  "ureq",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -2723,7 +2788,7 @@ name = "rongyuan"
 version = "0.1.1-rc.2"
 dependencies = [
  "anyhow",
- "hidapi",
+ "hid-transport",
 ]
 
 [[package]]
@@ -2853,7 +2918,7 @@ name = "scyrox"
 version = "0.1.1-rc.2"
 dependencies = [
  "anyhow",
- "hidapi",
+ "hid-transport",
 ]
 
 [[package]]

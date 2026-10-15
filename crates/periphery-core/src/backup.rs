@@ -37,8 +37,8 @@ fn is_profile(id: &str) -> bool {
 }
 
 impl Backup {
-    pub fn capture(dev: &mut dyn Device) -> Result<Backup> {
-        let snap = dev.snapshot()?;
+    pub async fn capture(dev: &mut dyn Device) -> Result<Backup> {
+        let snap = dev.snapshot().await?;
         let settings: Vec<(String, Value)> = snap
             .groups
             .iter()
@@ -175,13 +175,13 @@ pub fn plan(backup: &Backup, snap: &Snapshot) -> Plan {
     out
 }
 
-fn apply(dev: &mut dyn Device, step: &Step) -> Result<()> {
+async fn apply(dev: &mut dyn Device, step: &Step) -> Result<()> {
     match step {
-        Step::Setting(id, v) => dev.set(id, v),
-        Step::Key { layer, row, col, code } => dev.set_key(*layer, *row, *col, *code),
-        Step::KeyProperty { id, keys, value } => dev.set_key_property(id, keys, Some(value)),
-        Step::ResetKeyProperty { id, keys } => dev.set_key_property(id, keys, None),
-        Step::Pairs(id, p) => dev.set_key_pairs(id, p),
+        Step::Setting(id, v) => dev.set(id, v).await,
+        Step::Key { layer, row, col, code } => dev.set_key(*layer, *row, *col, *code).await,
+        Step::KeyProperty { id, keys, value } => dev.set_key_property(id, keys, Some(value)).await,
+        Step::ResetKeyProperty { id, keys } => dev.set_key_property(id, keys, None).await,
+        Step::Pairs(id, p) => dev.set_key_pairs(id, p).await,
     }
 }
 
@@ -193,13 +193,13 @@ pub struct Report {
 }
 
 /// Restores `backup`. With `dry_run`, only reports what would change.
-pub fn restore(dev: &mut dyn Device, backup: &Backup, dry_run: bool) -> Result<Report> {
+pub async fn restore(dev: &mut dyn Device, backup: &Backup, dry_run: bool) -> Result<Report> {
     let info = dev.info();
     if (info.vid, info.pid) != (backup.vid, backup.pid) {
         bail!("this backup is for {} {} ({:04x}:{:04x})", backup.brand, backup.model, backup.vid, backup.pid);
     }
     let mut report = Report::default();
-    let mut snap = dev.snapshot()?;
+    let mut snap = dev.snapshot().await?;
 
     // Switch to the backed-up profile first; the rest belongs to it.
     for (id, v) in backup.settings.iter().filter(|(id, _)| is_profile(id)) {
@@ -207,8 +207,8 @@ pub fn restore(dev: &mut dyn Device, backup: &Backup, dry_run: bool) -> Result<R
             let step = Step::Setting(id.clone(), v.clone());
             report.applied.push(step.to_string());
             if !dry_run {
-                apply(dev, &step)?;
-                snap = dev.snapshot()?;
+                apply(dev, &step).await?;
+                snap = dev.snapshot().await?;
             }
         }
     }
@@ -224,13 +224,13 @@ pub fn restore(dev: &mut dyn Device, backup: &Backup, dry_run: bool) -> Result<R
     // failures once after everything else has been applied.
     let mut failed = Vec::new();
     for step in steps {
-        match apply(dev, &step) {
+        match apply(dev, &step).await {
             Ok(()) => report.applied.push(step.to_string()),
             Err(e) => failed.push((step, e)),
         }
     }
     for (step, _) in std::mem::take(&mut failed) {
-        match apply(dev, &step) {
+        match apply(dev, &step).await {
             Ok(()) => report.applied.push(step.to_string()),
             Err(e) => report.errors.push(format!("{step}: {e:#}")),
         }

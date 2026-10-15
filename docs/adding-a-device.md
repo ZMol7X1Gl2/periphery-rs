@@ -26,11 +26,19 @@ may only need to fill gaps in an existing driver (step 6 still applies).
 ```
 crates/
   <brand>/             protocol library: HID transport, command ids, encodings
-                       (depends only on hidapi/anyhow — usable without Periphery)
+                       (depends only on hid-transport/anyhow — usable without Periphery)
+  hid-transport/       async HID: hidapi on the desktop, WebHID in the browser
   periphery-<brand>/   adapter: implements periphery_core::{Driver, Device}
   periphery-core/      the brand-neutral model the UI renders
   app/                 GUI + CLI; lists every driver in src/lib.rs
+  web/                 the same GUI in the browser (GitHub Pages)
 ```
+
+All device I/O is `async`, so one driver runs in the desktop app, the CLI
+and the web app. On the desktop the async calls simply block a worker
+thread; in the browser they wait on WebHID promises. Never call
+`std::thread::sleep` or `std::time::Instant` in driver code (both fail in the
+browser): use `hid_transport::sleep(..).await` and `hid_transport::Instant`.
 
 The UI never knows which brand it shows. A driver *describes* its settings as
 data (`Setting` with a `Kind`: toggle, range, choice, colour, text, action,
@@ -67,7 +75,7 @@ doc comments and when something doesn't behave as expected.
 
 ## 2. Probe the device read-only
 
-Make a throwaway Rust project with `hidapi` and talk to the real device
+Make a throwaway Rust project with `hidapi` (or `hid-transport`) and talk to the real device
 before writing the driver:
 
 - List the interfaces (`vendor_id`, `product_id`, `usage_page`, `usage`).
@@ -86,8 +94,13 @@ feature flags the device reports before probing optional commands.
 
 `crates/<brand>/` — a library anyone can use without Periphery.
 
-- Dependencies: `hidapi`, `anyhow` (plus `serde` only if you parse files).
-  **No dependency on `periphery-core`.**
+- Dependencies: `hid-transport`, `anyhow` (plus `serde` only if you parse
+  files). **No dependency on `periphery-core`.**
+- I/O methods are `async fn`s over `hid_transport::Device`. Its calls have
+  the shape of `hidapi`'s (`write`, `read_timeout`, `send_feature_report`,
+  `get_feature_report`) with the same byte layout: the first byte written is
+  the report id, and a read starts with the report id only for numbered
+  reports.
 - Use the workspace metadata in `Cargo.toml`:
   ```toml
   [package]
@@ -115,28 +128,37 @@ feature flags the device reports before probing optional commands.
 `periphery-core`, and implements two traits:
 
 ```rust
+#[async_trait(?Send)]
 impl Driver for MyDriver {
     fn name(&self) -> &'static str;
-    fn discover(&self, api: &HidApi) -> Vec<Result<Box<dyn Device>>>;
+    fn filters(&self) -> Vec<Filter>;                   // what the browser may offer
+    async fn discover(&self, api: &Api) -> Vec<Result<Box<dyn Device>>>;
 }
 
+#[async_trait(?Send)]
 impl Device for MyDevice {
     fn info(&self) -> &DeviceInfo;
-    fn snapshot(&mut self) -> Result<Snapshot>;          // read + describe
-    fn set(&mut self, id: &str, value: &Value) -> Result<()>;
+    async fn snapshot(&mut self) -> Result<Snapshot>;    // read + describe
+    async fn set(&mut self, id: &str, value: &Value) -> Result<()>;
     // optional:
-    fn set_key(&mut self, layer: u8, row: u8, col: u8, code: u16) -> Result<()>;
-    fn set_key_property(&mut self, id: &str, keys: &[(u8, u8)], value: Option<&Value>) -> Result<()>;
-    fn set_key_pairs(&mut self, id: &str, pairs: &[KeyPair]) -> Result<()>;
-    fn poll_changes(&mut self) -> Result<bool>;          // on-device changes
+    async fn set_key(&mut self, layer: u8, row: u8, col: u8, code: u16) -> Result<()>;
+    async fn set_key_property(&mut self, id: &str, keys: &[(u8, u8)], value: Option<&Value>) -> Result<()>;
+    async fn set_key_pairs(&mut self, id: &str, pairs: &[KeyPair]) -> Result<()>;
+    async fn poll_changes(&mut self) -> Result<bool>;    // on-device changes
 }
 ```
 
+`async_trait`, `hid::{Api, Filter}` and the rest come from `periphery_core`.
+
 Guidelines:
 
-- **`discover`**: filter `api.device_list()` by vendor id and usage page;
-  return nothing when your hardware isn't present. Return `Err` only for a
-  device that exists but failed to open.
+- **`filters`**: the vendor id / product ids / usage page of the interfaces
+  you use. The browser only lets a page see devices the user picked, and its
+  picker lists only devices matching some driver's filters.
+- **`discover`**: filter `api.devices()` by vendor id and usage page (a
+  `Filter` has `matches`), open with `api.open(info).await`; return nothing
+  when your hardware isn't present. Return `Err` only for a device that
+  exists but failed to open.
 - **`snapshot`**: read everything, then describe it. Group related settings
   (`Group::new("Sensor")`). Put read-only facts (battery, firmware,
   connection) in `status`. If the device can't be configured right now

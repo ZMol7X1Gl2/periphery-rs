@@ -36,14 +36,18 @@ values that differ.
 | [`periphery-via`](crates/periphery-via) | adapter | Exposes `qmk-via` through the core model. |
 | [`periphery-logitech`](crates/periphery-logitech) | adapter | Exposes `logitech-hidpp` through the core model. |
 | [`periphery-rongyuan`](crates/periphery-rongyuan) | adapter | Exposes `rongyuan` through the core model. |
-| [`periphery`](crates/app) | app | GUI (`periphery`) and CLI (`periphery-cli`). |
+| [`hid-transport`](crates/hid-transport) | library | Async HID with one API over hidapi (desktop) and WebHID (browser). |
+| [`periphery`](crates/app) | app | GUI (`periphery`) and CLI (`periphery-cli`); the GUI is shared with the web app. |
+| [`periphery-web`](crates/web) | app | The GUI in the browser, published to GitHub Pages. |
 
-The protocol crates can be used on their own:
+The protocol crates can be used on their own. Their I/O is async over
+[`hid-transport`](crates/hid-transport), which uses hidapi on the desktop and
+WebHID in the browser:
 
 ```rust
-let api = hidapi::HidApi::new()?;
-let mouse = scyrox::device::Mouse::open(&api)?;
-println!("{:?}", mouse.read_settings()?);
+let api = hid_transport::Api::new().await?;
+let mouse = scyrox::device::Mouse::open(&api).await?;
+println!("{:?}", mouse.read_settings().await?);
 ```
 
 Adding a brand = a protocol crate + an adapter implementing
@@ -52,6 +56,23 @@ See **[docs/adding-a-device.md](docs/adding-a-device.md)** for the full guide
 and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution rules.
 
 ## Running
+
+### In the browser
+
+Open the GitHub Pages site in Chrome, Edge or Opera on a desktop (Firefox
+and Safari have no WebHID), click **Connect a device…** and pick your
+devices. Chrome remembers the choice for next time.
+
+- `master`: https://zmol7x1gl2.github.io/periphery-rs/
+- any other branch: https://zmol7x1gl2.github.io/periphery-rs/<branch>/
+  (lowercased, other characters than `a-z 0-9 . - _` become `-`)
+
+Locally: `cargo install trunk`, `rustup target add wasm32-unknown-unknown`,
+then `trunk serve` in `crates/web` and open http://127.0.0.1:8080/.
+
+On Linux the browser needs the same udev rule as the desktop app.
+
+### On the desktop
 
 ```
 cargo run --release --bin periphery                 # GUI
