@@ -26,7 +26,19 @@ impl Driver for RoccatDriver {
 
     async fn discover(&self, api: &Api) -> Vec<Result<Box<dyn Device>>> {
         let mut out = Vec::new();
-        for info in KoneAimo::candidates(api) {
+        let candidates = KoneAimo::candidates(api);
+        if candidates.is_empty() {
+            let seen: Vec<String> = KoneAimo::listings(api)
+                .map(|d| format!("if={} page={:04x} usage={:04x}", d.interface_number, d.usage_page, d.usage))
+                .collect();
+            if !seen.is_empty() {
+                out.push(Err(anyhow::anyhow!(
+                    "found a Kone Aimo, but not its control collection (interface 0, usage page 000b); listed: {}",
+                    seen.join(", ")
+                )));
+            }
+        }
+        for info in candidates {
             match KoneAimo::open(api, info).await {
                 Ok(m) => out.push(Ok(Box::new(RoccatDevice::new(m)) as Box<dyn Device>)),
                 Err(e) => out.push(Err(e.context(format!("{:04x}:{:04x}", info.vendor_id, info.product_id)))),

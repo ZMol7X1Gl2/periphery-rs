@@ -86,9 +86,30 @@ impl KoneAimo {
             .collect()
     }
 
+    /// Every listed HID collection of a Kone Aimo, whichever interface.
+    pub fn listings(api: &Api) -> impl Iterator<Item = &DeviceInfo> {
+        api.devices().filter(|d| d.vendor_id == VENDOR_ID && model(d.product_id).is_some())
+    }
+
     /// The control interface of every Kone Aimo in `api`'s enumeration.
-    pub fn candidates(api: &Api) -> impl Iterator<Item = &DeviceInfo> {
-        api.devices().filter(|d| Self::filters().iter().any(|f| f.matches(d)) && d.interface_number <= 0)
+    ///
+    /// In the browser every listing of a device opens the same device and
+    /// the report id picks the collection, so when the browser doesn't list
+    /// the usage page `0x0B` collection, any listing of the mouse will do.
+    pub fn candidates(api: &Api) -> Vec<&DeviceInfo> {
+        let exact: Vec<_> = Self::listings(api)
+            .filter(|d| Self::filters().iter().any(|f| f.matches(d)) && d.interface_number <= 0)
+            .collect();
+        if !exact.is_empty() {
+            return exact;
+        }
+        let mut out: Vec<&DeviceInfo> = Vec::new();
+        for d in Self::listings(api).filter(|d| d.interface_number < 0) {
+            if !out.iter().any(|o| o.product_id == d.product_id) {
+                out.push(d);
+            }
+        }
+        out
     }
 
     pub async fn open(api: &Api, info: &DeviceInfo) -> Result<Self> {
