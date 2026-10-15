@@ -214,7 +214,7 @@ fn print_snapshot(s: &Snapshot) {
 async fn diag(api: &Api) -> Result<()> {
     println!("periphery {}", env!("CARGO_PKG_VERSION"));
     for d in api.devices() {
-        if matches!(d.vendor_id, 0x046D | 0x3151 | 0x3434 | 0x3554) {
+        if matches!(d.vendor_id, 0x046D | 0x258A | 0x3151 | 0x3434 | 0x3554) {
             println!(
                 "hid {:04x}:{:04x} if={} page={:04x} usage={:04x} {:?}",
                 d.vendor_id, d.product_id, d.interface_number, d.usage_page, d.usage, d.product
@@ -264,6 +264,9 @@ logitech index {:#04x} on {:04x}, HID++ {}.{}", dev.index, dev.product_id, dev.p
         }
     }
     for line in periphery_rongyuan::diag(api).await {
+        println!("{line}");
+    }
+    for line in periphery_aula::diag(api).await {
         println!("{line}");
     }
     Ok(())

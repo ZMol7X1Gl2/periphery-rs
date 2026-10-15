@@ -440,6 +440,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aula"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "hid-transport",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2415,6 +2423,7 @@ dependencies = [
  "futures",
  "js-sys",
  "logitech-hidpp",
+ "periphery-aula",
  "periphery-core",
  "periphery-logitech",
  "periphery-rongyuan",
@@ -2425,6 +2434,15 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "periphery-aula"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "aula",
+ "periphery-core",
 ]
 
 [[package]]

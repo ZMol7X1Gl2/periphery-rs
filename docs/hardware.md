@@ -25,6 +25,9 @@ know it.
 | Logitech | PRO X Superlight 2 | Lightspeed receiver | ✅ | 🟡 | Software (live) mode confirmed working since 0.1.1-rc.2 |
 | Logitech | Other HID++ 2.0 mice | Receiver or USB | 🟡 | 🟡 | |
 | Ajazz | AJ179 PRO / APEX / MC PRO, AJ159 PRO / APEX | Wired (`3151:4026` …) or receiver | 🟡 | 🟡 | Protocol recovered from the qmk.top web driver |
+| AULA | F75 | USB (`258A:010C`) | 🟡 | 🟡 | Protocol from community re-implementations checked on an F75 |
+| AULA | F87 / F87 PRO / F99 / F99 Pro / H108 | USB (`258A:010C`) | 🟡 | 🟡 | Same protocol; brightness 0-4 instead of 0-9 |
+| AULA | F75 and siblings | 2.4 GHz dongle (`3554:FA09`) / Bluetooth | ❌ | ❌ | Different 20-byte transport |
 
 ## Features
 
@@ -93,3 +96,23 @@ know it.
 Open questions for the first test: whether the `D3`/`D4` replies echo the
 command byte, the button matrix (`D0`) reply offset, and the receiver's
 product id. `periphery-cli diag` prints the raw replies.
+
+### AULA
+
+| Feature | Status |
+|---|---|
+| Model detection (identity bytes) | 🟡 |
+| Lighting effect, brightness, speed, colour | 🟡 |
+| Backlight sleep timer | 🟡 |
+| Factory reset | 🟡 |
+| Backup / restore | 🟡 |
+| Keymap | ❌ (community sources disagree on the format) |
+| Per-key RGB | ❌ (community sources disagree on the format) |
+| Debounce | ❌ (offset unconfirmed) |
+| 2.4 GHz dongle and Bluetooth | ❌ |
+
+Open questions for the first test: whether the identity is read from the
+right collection on Windows (the keyboard has several `0xFF00` collections),
+which direction the speed levels run, and whether every effect's settings sit
+at `0x3A + 2 × (effect − 1)` (only effect 1 has been confirmed).
+`periphery-cli diag` prints the identity and the raw lighting page.

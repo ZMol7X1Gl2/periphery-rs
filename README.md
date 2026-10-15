@@ -15,6 +15,9 @@ Currently supported:
   APEX), wired or through their receiver: battery, profiles, polling rate, DPI
   stages and colours, lift-off distance, angle snapping, ripple control,
   buttons, factory reset. Not yet tested on a real mouse.
+- **AULA** F75 keyboards (and the F87 / F99 / H108 that share its protocol)
+  over the USB cable: lighting effect, brightness, speed and colour, backlight
+  sleep timer, factory reset. Not yet tested on a real keyboard.
 - **QMK/VIA** keyboards of any brand: keymap, layers, lighting menus, macros.
 - **Keychron** extensions on top of VIA: magnetic-switch (Hall-effect) actuation
   and rapid trigger, global and per key; snap tap; per-key RGB; sleep timers;
@@ -34,11 +37,13 @@ have been tested on real hardware.
 | [`qmk-via`](crates/qmk-via) | library | QMK/VIA raw-HID protocol, keycodes, layout definitions, macros, menus, and Keychron extensions. No Periphery dependency. |
 | [`logitech-hidpp`](crates/logitech-hidpp) | library | Logitech HID++ 2.0: feature discovery, battery, DPI, report rate, onboard profiles (format + CRC). No Periphery dependency. |
 | [`rongyuan`](crates/rongyuan) | library | Rongyuan firmware protocol (feature-report transport, receiver relay, PAN1080 mouse commands, Ajazz model list). No Periphery dependency. |
+| [`aula`](crates/aula) | library | AULA keyboard protocol (wired feature-report transport, lighting page, model list). No Periphery dependency. |
 | [`periphery-core`](crates/periphery-core) | library | Brand-neutral model: `Device`/`Driver` traits, setting descriptors, keymaps, per-key properties, key-pair lists, backups. |
 | [`periphery-scyrox`](crates/periphery-scyrox) | adapter | Exposes `scyrox` through the core model. |
 | [`periphery-via`](crates/periphery-via) | adapter | Exposes `qmk-via` through the core model. |
 | [`periphery-logitech`](crates/periphery-logitech) | adapter | Exposes `logitech-hidpp` through the core model. |
 | [`periphery-rongyuan`](crates/periphery-rongyuan) | adapter | Exposes `rongyuan` through the core model. |
+| [`periphery-aula`](crates/periphery-aula) | adapter | Exposes `aula` through the core model. |
 | [`hid-transport`](crates/hid-transport) | library | Async HID with one API over hidapi (desktop) and WebHID (browser). |
 | [`periphery`](crates/app) | app | GUI (`periphery`) and CLI (`periphery-cli`); the GUI is shared with the web app. |
 | [`periphery-web`](crates/web) | app | The GUI in the browser, published to GitHub Pages. |

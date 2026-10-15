@@ -1,0 +1,11 @@
+[package]
+name = "aula"
+description = "Protocol library for AULA keyboards such as the F75 (wired feature-report protocol of the vendor's OemDrv.exe)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+hid-transport.workspace = true

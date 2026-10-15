@@ -1,0 +1,12 @@
+[package]
+name = "periphery-aula"
+description = "Periphery driver adapter for AULA keyboards (F75 and its siblings)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+aula = { path = "../aula" }
+periphery-core = { path = "../periphery-core" }

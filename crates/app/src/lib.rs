@@ -8,11 +8,12 @@ pub mod ui;
 pub mod worker;
 
 /// Every driver compiled into the app. Order decides listing order.
-pub fn drivers() -> [&'static dyn Driver; 4] {
+pub fn drivers() -> [&'static dyn Driver; 5] {
     [
         &periphery_scyrox::ScyroxDriver,
         &periphery_via::ViaDriver,
         &periphery_logitech::LogitechDriver,
         &periphery_rongyuan::RongyuanDriver,
+        &periphery_aula::AulaDriver,
     ]
 }

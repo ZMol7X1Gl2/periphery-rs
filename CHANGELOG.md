@@ -10,6 +10,13 @@ release workflow turns Unreleased into the new version.
 
 ## [Unreleased]
 
+### Added
+
+- AULA F75 keyboards over the USB cable: lighting effect, brightness, speed
+  and colour, backlight sleep timer, and factory reset. The F87, F99 and H108
+  share the protocol and are recognised too. Not yet tested on a real
+  keyboard.
+
 ### Changed
 
 - The Windows download includes this changelog.
