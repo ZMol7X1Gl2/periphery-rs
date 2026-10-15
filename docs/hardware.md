@@ -25,8 +25,8 @@ know it.
 | Logitech | PRO X Superlight 2 | Lightspeed receiver | ✅ | 🟡 | Software (live) mode confirmed working since 0.1.1-rc.2 |
 | Logitech | Other HID++ 2.0 mice | Receiver or USB | 🟡 | 🟡 | |
 | Ajazz | AJ179 PRO / APEX / MC PRO, AJ159 PRO / APEX | Wired (`3151:4026` …) or receiver | 🟡 | 🟡 | Protocol recovered from the qmk.top web driver |
-| ROCCAT | Kone Aimo Remastered / 16K (`1E7D:2E2C`) | USB | 🟡 | 🟡 | Protocol from community projects; the report layout was confirmed on this model by them |
-| ROCCAT | Kone Aimo (`1E7D:2E27`) | USB | 🟡 | 🟡 | Assumed to share the Remastered's layout (libratbag PR #1883 treats them alike) |
+| ROCCAT | Kone Aimo Remastered / 16K (`1E7D:2E2C`) | USB | 🟡 | ❌ | Protocol from community projects; the report layout was confirmed on this model by them. Web: Chrome, Edge and Arc on Windows hide the settings interface (tested with a 16K) |
+| ROCCAT | Kone Aimo (`1E7D:2E27`) | USB | 🟡 | ❌ | Assumed to share the Remastered's layout (libratbag PR #1883 treats them alike) |
 
 ## Features
 
@@ -109,7 +109,15 @@ product id. `periphery-cli diag` prints the raw replies.
 | Macros | ❌ (shown as "Macro", kept as is) |
 | Sensitivity, angle snapping, live (non-saved) lighting | ❌ |
 
-Things to check on the first test: that the device is found on Windows (the
+The web app can't configure these mice: on a Kone Aimo 16K, Chrome, Edge and
+Arc on Windows listed the mouse in their picker (which matches usage page
+`0x0B`) but removed that collection's reports before the page got the device;
+only the `0x0A` and `0x0C` collections reached it, and feature reports `04`/`05`
+failed with "Invalid feature report ID" in the device log. Chromium removes
+reports it considers protected at that step; its built-in blocklist has no
+ROCCAT entry, so the rule that matches is not known yet.
+
+Things to check on the first desktop test: that the device is found on Windows (the
 driver opens the usage page `0x0B` collection on interface 0, as OpenRGB
 does), that reads work through hidapi on Windows (they fall back to a
 1100-byte buffer if an exact-size read is refused), and that a written value

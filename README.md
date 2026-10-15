@@ -17,7 +17,8 @@ Currently supported:
   buttons, factory reset. Not yet tested on a real mouse.
 - **ROCCAT** Kone Aimo and Kone Aimo Remastered: onboard profiles, polling
   rate, DPI stages, lighting (effect, speed, brightness, zone colours), buttons
-  and the Easy-Shift layer (incl. keyboard shortcuts). Not yet tested on a real
+  and the Easy-Shift layer (incl. keyboard shortcuts). Desktop app only: the
+  browser hides the mouse's settings interface. Not yet tested on a real
   mouse.
 - **QMK/VIA** keyboards of any brand: keymap, layers, lighting menus, macros.
 - **Keychron** extensions on top of VIA: magnetic-switch (Hall-effect) actuation

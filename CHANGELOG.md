@@ -12,10 +12,12 @@ release workflow turns Unreleased into the new version.
 
 ### Added
 
-- ROCCAT Kone Aimo and Kone Aimo Remastered, on the desktop and in the
-  browser: onboard profiles, polling rate, DPI stages, lighting (effect,
-  speed, brightness, zone colours), buttons and the Easy-Shift layer,
-  including keyboard shortcuts. Not yet tested on a real mouse.
+- ROCCAT Kone Aimo and Kone Aimo Remastered in the desktop app: onboard
+  profiles, polling rate, DPI stages, lighting (effect, speed, brightness,
+  zone colours), buttons and the Easy-Shift layer, including keyboard
+  shortcuts. Not yet tested on a real mouse. The web app finds these mice
+  but can't configure them, because Chrome and Edge hide their settings
+  interface; it says so and points to the desktop app.
 
 ### Changed
 

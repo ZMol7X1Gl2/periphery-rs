@@ -28,10 +28,19 @@ impl Driver for RoccatDriver {
         let mut out = Vec::new();
         let candidates = KoneAimo::candidates(api);
         if candidates.is_empty() {
-            let seen: Vec<String> = KoneAimo::listings(api)
+            let listed: Vec<_> = KoneAimo::listings(api).collect();
+            let seen: Vec<String> = listed
+                .iter()
                 .map(|d| format!("if={} page={:04x} usage={:04x}", d.interface_number, d.usage_page, d.usage))
                 .collect();
-            if !seen.is_empty() {
+            // Interface numbers are only unknown in the browser.
+            if listed.iter().any(|d| d.interface_number < 0) {
+                out.push(Err(anyhow::anyhow!(
+                    "found a Kone Aimo, but the browser hides its settings interface (Chrome and Edge remove it \
+                     before the page gets the mouse). Use the desktop app for this mouse. Listed: {}",
+                    seen.join(", ")
+                )));
+            } else if !seen.is_empty() {
                 out.push(Err(anyhow::anyhow!(
                     "found a Kone Aimo, but not its control collection (interface 0, usage page 000b); listed: {}",
                     seen.join(", ")

@@ -93,23 +93,15 @@ impl KoneAimo {
 
     /// The control interface of every Kone Aimo in `api`'s enumeration.
     ///
-    /// In the browser every listing of a device opens the same device and
-    /// the report id picks the collection, so when the browser doesn't list
-    /// the usage page `0x0B` collection, any listing of the mouse will do.
+    /// Chrome and Edge on Windows list this collection in their device
+    /// picker but strip its reports before the page gets the device, so in
+    /// the browser it can be missing although the mouse is granted (seen on
+    /// a Kone Aimo 16K: only the `0x0A` and `0x0C` collections reached the
+    /// page).
     pub fn candidates(api: &Api) -> Vec<&DeviceInfo> {
-        let exact: Vec<_> = Self::listings(api)
+        Self::listings(api)
             .filter(|d| Self::filters().iter().any(|f| f.matches(d)) && d.interface_number <= 0)
-            .collect();
-        if !exact.is_empty() {
-            return exact;
-        }
-        let mut out: Vec<&DeviceInfo> = Vec::new();
-        for d in Self::listings(api).filter(|d| d.interface_number < 0) {
-            if !out.iter().any(|o| o.product_id == d.product_id) {
-                out.push(d);
-            }
-        }
-        out
+            .collect()
     }
 
     pub async fn open(api: &Api, info: &DeviceInfo) -> Result<Self> {
