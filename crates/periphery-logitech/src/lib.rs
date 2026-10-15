@@ -191,7 +191,10 @@ impl LogitechMouse {
             }
         }
         let stages = || Kind::choice((0..DPI_STAGES as i64).filter(|i| p.dpi(*i as usize) != 0).map(|i| (i, format!("Stage {}", i + 1))));
-        g.push(Setting::new("p.default", "Default DPI stage", stages(), Value::Int(p.default_dpi_stage() as i64)));
+        g.push(
+            Setting::new("p.default", "Default DPI stage", stages(), Value::Int(p.default_dpi_stage() as i64))
+                .help("Stage the mouse starts in when this profile loads; changing it also switches to it now"),
+        );
         g.push(
             Setting::new("p.shift", "DPI shift stage", stages(), Value::Int(p.shift_dpi_stage() as i64))
                 .help("DPI used while a button set to “DPI shift” is held"),
@@ -320,7 +323,13 @@ impl Device for LogitechMouse {
             }
             ("p", "default") => {
                 let i = value.int()? as u8;
-                self.edit_profile(|p| Ok(p.set_default_dpi_stage(i))).await
+                self.edit_profile(|p| Ok(p.set_default_dpi_stage(i))).await?;
+                // The mouse only applies the default stage when a profile
+                // loads; switch the running stage too when it's the active one.
+                if self.dev.mode().await? == Mode::Onboard && Some(self.dev.current_profile().await?) == self.edit_sector {
+                    self.dev.set_current_dpi_index(i).await?;
+                }
+                Ok(())
             }
             ("p", "shift") => {
                 let i = value.int()? as u8;
