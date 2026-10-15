@@ -10,6 +10,13 @@ release workflow turns Unreleased into the new version.
 
 ## [Unreleased]
 
+### Added
+
+- ROCCAT Kone Aimo and Kone Aimo Remastered, on the desktop and in the
+  browser: onboard profiles, polling rate, DPI stages, lighting (effect,
+  speed, brightness, zone colours), buttons and the Easy-Shift layer,
+  including keyboard shortcuts. Not yet tested on a real mouse.
+
 ### Changed
 
 - The Windows download includes this changelog.

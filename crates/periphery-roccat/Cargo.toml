@@ -1,0 +1,12 @@
+[package]
+name = "periphery-roccat"
+description = "Periphery driver adapter for ROCCAT mice (Kone Aimo, Kone Aimo Remastered)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+periphery-core = { path = "../periphery-core" }
+roccat = { path = "../roccat" }

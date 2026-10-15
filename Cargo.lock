@@ -2417,6 +2417,7 @@ dependencies = [
  "logitech-hidpp",
  "periphery-core",
  "periphery-logitech",
+ "periphery-roccat",
  "periphery-rongyuan",
  "periphery-scyrox",
  "periphery-via",
@@ -2446,6 +2447,15 @@ dependencies = [
  "anyhow",
  "logitech-hidpp",
  "periphery-core",
+]
+
+[[package]]
+name = "periphery-roccat"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "periphery-core",
+ "roccat",
 ]
 
 [[package]]
@@ -2781,6 +2791,14 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "roccat"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "hid-transport",
 ]
 
 [[package]]

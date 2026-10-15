@@ -1,0 +1,11 @@
+[package]
+name = "roccat"
+description = "Protocol library for ROCCAT mice: Kone Aimo and Kone Aimo Remastered (onboard profiles, DPI, polling rate, lighting, buttons)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+hid-transport.workspace = true

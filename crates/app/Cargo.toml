@@ -12,6 +12,7 @@ eframe = "0.29.1"
 periphery-core = { path = "../periphery-core" }
 periphery-logitech = { path = "../periphery-logitech" }
 periphery-rongyuan = { path = "../periphery-rongyuan" }
+periphery-roccat = { path = "../periphery-roccat" }
 logitech-hidpp = { path = "../logitech-hidpp" }
 periphery-scyrox = { path = "../periphery-scyrox" }
 periphery-via = { path = "../periphery-via" }
