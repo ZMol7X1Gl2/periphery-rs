@@ -1504,7 +1504,7 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
 name = "hid-transport"
-version = "0.1.1-rc.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -1836,7 +1836,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "logitech-hidpp"
-version = "0.1.1-rc.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "hid-transport",
@@ -2408,7 +2408,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "periphery"
-version = "0.1.1-rc.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "eframe",
@@ -2429,7 +2429,7 @@ dependencies = [
 
 [[package]]
 name = "periphery-core"
-version = "0.1.1-rc.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2441,7 +2441,7 @@ dependencies = [
 
 [[package]]
 name = "periphery-logitech"
-version = "0.1.1-rc.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "logitech-hidpp",
@@ -2450,7 +2450,7 @@ dependencies = [
 
 [[package]]
 name = "periphery-rongyuan"
-version = "0.1.1-rc.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "periphery-core",
@@ -2459,7 +2459,7 @@ dependencies = [
 
 [[package]]
 name = "periphery-scyrox"
-version = "0.1.1-rc.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "periphery-core",
@@ -2468,7 +2468,7 @@ dependencies = [
 
 [[package]]
 name = "periphery-via"
-version = "0.1.1-rc.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "periphery-core",
@@ -2477,7 +2477,7 @@ dependencies = [
 
 [[package]]
 name = "periphery-web"
-version = "0.1.1-rc.2"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "log",
@@ -2625,7 +2625,7 @@ checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
 name = "qmk-via"
-version = "0.1.1-rc.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "hid-transport",
@@ -2785,7 +2785,7 @@ dependencies = [
 
 [[package]]
 name = "rongyuan"
-version = "0.1.1-rc.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "hid-transport",
@@ -2915,7 +2915,7 @@ dependencies = [
 
 [[package]]
 name = "scyrox"
-version = "0.1.1-rc.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "hid-transport",
