@@ -29,6 +29,14 @@ release workflow turns Unreleased into the new version.
   from Periphery. The AJ179 PRO ignores it, so trying to change it failed
   with "the mouse did not keep the DPI change". Use the DPI button on the
   mouse instead. `periphery-cli diag` now also prints the raw DPI reply.
+- Every mouse now uses the same page, whatever the brand. The profile sits
+  at the top, then tabs: DPI & polling, Buttons, Sensor, Lighting, and
+  Power & device. Polling rates are a row of buttons. DPI stages are one
+  table where you pick the active stage, set the DPI and the stage colour,
+  and add or remove stages with − / +. Settings only one brand has (Scyrox
+  competition mode, the ROCCAT Easy-Shift layer, Logitech's onboard
+  profile while in software mode…) are on that brand's own tab.
+- On/off settings are switches instead of checkboxes.
 
 ## [0.3.0-rc.2] - 2026-10-15
 

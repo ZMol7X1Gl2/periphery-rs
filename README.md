@@ -97,7 +97,9 @@ periphery-cli backup <n> <file.json> | restore <n> <file.json> [--dry-run]
 ```
 
 GUI options: `--device <name>` preselects a device, `--tab keymap[:<setting>]`
-opens the keymap tab (optionally on a per-key setting such as `actuation`).
+opens the keymap tab (optionally on a per-key setting such as `actuation`),
+and `--tab dpi|buttons|sensor|lighting|power|specific` opens that tab of
+the mouse page.
 
 Keychron layout definitions are downloaded once from launcher.keychron.com and
 cached in `%APPDATA%\periphery\definitions`. For other VIA keyboards, place a

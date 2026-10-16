@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use periphery_core::hid::{self, Api, Filter};
 use periphery_core::{
-    Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Setting, Snapshot, Value, async_trait,
+    Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Role, Setting, Snapshot, Value, async_trait,
 };
 
 use config::{ANGLE_TUNE_RANGE, Change, KEY_NAMES, MAX_DEBOUNCE, PROFILES, REPORT_RATES, SLEEP_OPTIONS, STAGES};
@@ -316,7 +316,7 @@ impl Device for ScyroxDevice {
             out.notice = Some("The mouse is asleep or switched off — move it to wake it up.".into());
             if !wired {
                 let mut g = Group::new("Wireless");
-                g.push(Setting::action(
+                g.push_as(Role::Wireless, Setting::action(
                     "pair",
                     "Pair a mouse",
                     Some("Hold left + right + middle on the mouse for 3 s until the light flashes, keep it close to the receiver, then continue."),
@@ -337,7 +337,7 @@ impl Device for ScyroxDevice {
 
         if let Some(p) = online.profile {
             let mut g = Group::new("Profile");
-            g.push(Setting::new(
+            g.push_as(Role::Profile, Setting::new(
                 "profile",
                 "Onboard profile",
                 Kind::choice((0..PROFILES as i64).map(|i| (i, format!("Profile {}", i + 1)))),
@@ -348,7 +348,7 @@ impl Device for ScyroxDevice {
 
         let mut perf = Group::new("Performance");
         let max_rate = snap.info.max_report_rate();
-        perf.push(Setting::new(
+        perf.push_as(Role::PollingRate, Setting::new(
             "rate",
             "Polling rate",
             Kind::choice(
@@ -356,8 +356,8 @@ impl Device for ScyroxDevice {
             ),
             Value::Int(s.report_rate as i64),
         ));
-        perf.push(Setting::new("stages", "DPI stages", Kind::range(1, STAGES as i64), Value::Int(s.stage_count as i64)));
-        perf.push(Setting::new(
+        perf.push_as(Role::StageCount, Setting::new("stages", "DPI stages", Kind::range(1, STAGES as i64), Value::Int(s.stage_count as i64)));
+        perf.push_as(Role::ActiveStage, Setting::new(
             "stage",
             "Active stage",
             Kind::choice((0..s.stage_count as i64).map(|i| (i, format!("Stage {}", i + 1)))),
@@ -368,13 +368,13 @@ impl Device for ScyroxDevice {
         let mut dpi = Group::new("DPI");
         let step = if snap.sensor == Sensor::Paw3950 { 50 } else { 1 };
         for i in 0..s.stage_count as usize {
-            dpi.push(Setting::new(
+            dpi.push_as(Role::Dpi(i as u8), Setting::new(
                 format!("dpi.{i}"),
                 format!("Stage {} DPI", i + 1),
                 Kind::range_unit(step, snap.sensor.max_dpi() as i64, step, 1.0, " DPI"),
                 Value::Int(s.dpis[i].0 as i64),
             ));
-            dpi.push(Setting::new(
+            dpi.push_as(Role::StageColor(i as u8), Setting::new(
                 format!("color.{i}"),
                 format!("Stage {} colour", i + 1),
                 Kind::Color,
@@ -384,18 +384,19 @@ impl Device for ScyroxDevice {
         out.groups.push(dpi);
 
         let mut sensor = Group::new("Sensor");
-        sensor.push(Setting::new(
+        sensor.push_as(Role::LiftOff, Setting::new(
             "lod",
             "Lift-off distance",
             Kind::choice(config::lod_options(snap.sensor).iter().map(|(v, l)| (*v as i64, *l))),
             Value::Int(s.lod as i64),
         ));
-        sensor.push(Setting::toggle("motion_sync", "Motion sync", s.motion_sync));
-        sensor.push(
+        sensor.push_as(Role::MotionSync, Setting::toggle("motion_sync", "Motion sync", s.motion_sync));
+        sensor.push_as(
+            Role::AngleSnap,
             Setting::toggle("angle_snap", "Angle snapping", s.angle_snap)
                 .help("Straightens slightly diagonal movements"),
         );
-        sensor.push(Setting::toggle("ripple", "Ripple control", s.ripple));
+        sensor.push_as(Role::Ripple, Setting::toggle("ripple", "Ripple control", s.ripple));
         if let Some(v) = s.competition {
             sensor.push(
                 Setting::toggle("competition", "Competition mode", v)
@@ -416,7 +417,8 @@ impl Device for ScyroxDevice {
                 Value::Int(v as i64),
             ));
         }
-        sensor.push(
+        sensor.push_as(
+            Role::Debounce,
             Setting::new("debounce", "Debounce", Kind::range_unit(0, MAX_DEBOUNCE as i64, 1, 1.0, " ms"), Value::Int(s.debounce as i64))
                 .help("Raise it if a button double-clicks"),
         );
@@ -436,15 +438,15 @@ impl Device for ScyroxDevice {
             }
             let mut label = name.to_string();
             label[..1].make_ascii_uppercase();
-            buttons.push(Setting::new(format!("key.{k}"), label, Kind::Choice(options), Value::Int(value)));
+            buttons.push_as(Role::Button(k as u8), Setting::new(format!("key.{k}"), label, Kind::Choice(options), Value::Int(value)));
             if let KeyAction::Fire { interval, times } = s.keys[k] {
-                buttons.push(Setting::new(
+                buttons.push_as(Role::ButtonOption(k as u8), Setting::new(
                     format!("fire_interval.{k}"),
                     "  Fire interval",
                     Kind::range_unit(*FIRE_INTERVAL.start() as i64, *FIRE_INTERVAL.end() as i64, 1, 1.0, " ms"),
                     Value::Int(interval as i64),
                 ));
-                buttons.push(
+                buttons.push_as(Role::ButtonOption(k as u8), 
                     Setting::new(
                         format!("fire_times.{k}"),
                         "  Fire clicks",
@@ -456,13 +458,13 @@ impl Device for ScyroxDevice {
             }
             match s.keys[k] {
                 KeyAction::Shortcut => match &s.shortcuts[k] {
-                    Some(sc) if sc.is_media() => buttons.push(Setting::new(
+                    Some(sc) if sc.is_media() => buttons.push_as(Role::ButtonOption(k as u8), Setting::new(
                         format!("media.{k}"),
                         "  Media key",
                         Kind::choice(MEDIA_TABLE.iter().map(|(l, v)| (*v as i64, *l))),
                         Value::Int(sc.0[0].value as i64),
                     )),
-                    sc => buttons.push(
+                    sc => buttons.push_as(Role::ButtonOption(k as u8), 
                         Setting::new(
                             format!("combo.{k}"),
                             "  Keys",
@@ -474,7 +476,7 @@ impl Device for ScyroxDevice {
                 },
                 KeyAction::Macro { cycle: c } => {
                     let events = s.macros[k].as_ref().map(|m| events_to_text(&m.events)).unwrap_or_default();
-                    buttons.push(
+                    buttons.push_as(Role::ButtonOption(k as u8), 
                         Setting::new(format!("macro.{k}"), "  Macro", Kind::Text { max_len: 2000 }, Value::Text(events))
                             .help("Events separated by spaces: +Key press, -Key release, Key tap, @ms delay after, e.g. +ShiftLeft H -ShiftLeft I@50. Mouse buttons: mouse-left …"),
                     );
@@ -488,7 +490,7 @@ impl Device for ScyroxDevice {
                     if !repeats.iter().any(|(v, _)| *v == c as i64) {
                         repeats.push((c as i64, cycle::label(c)));
                     }
-                    buttons.push(Setting::new(format!("macro_repeat.{k}"), "  Repeat", Kind::Choice(repeats), Value::Int(c as i64)));
+                    buttons.push_as(Role::ButtonOption(k as u8), Setting::new(format!("macro_repeat.{k}"), "  Repeat", Kind::Choice(repeats), Value::Int(c as i64)));
                 }
                 _ => {}
             }
@@ -496,7 +498,7 @@ impl Device for ScyroxDevice {
         out.groups.push(buttons);
 
         let mut power = Group::new("Power & wireless");
-        power.push(Setting::new(
+        power.push_as(Role::Sleep, Setting::new(
             "sleep",
             "Sleep after",
             Kind::choice(SLEEP_OPTIONS.iter().map(|s| (*s as i64, fmt_secs(*s)))),
@@ -504,18 +506,19 @@ impl Device for ScyroxDevice {
         ));
         if !wired {
             if let Some(lr) = online.long_range {
-                power.push(
+                power.push_as(
+                    Role::Wireless,
                     Setting::toggle("long_range", "Long-range mode", lr)
                         .help("Stronger signal at distance; shortens battery life"),
                 );
             }
-            power.push(Setting::action(
+            power.push_as(Role::Wireless, Setting::action(
                 "pair",
                 "Pair a mouse",
                 Some("Hold left + right + middle on the mouse for 3 s until the light flashes, keep it close to the receiver, then continue."),
             ));
         }
-        power.push(Setting::action("reset", "Factory reset", Some("Reset every setting to factory defaults?")));
+        power.push_as(Role::FactoryReset, Setting::action("reset", "Factory reset", Some("Reset every setting to factory defaults?")));
         out.groups.push(power);
 
         self.last = Some(snap);

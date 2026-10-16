@@ -4,7 +4,7 @@
 
 use anyhow::{Result, bail};
 use periphery_core::hid::{Api, Filter};
-use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Setting, Snapshot, Value, async_trait};
+use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Role, Setting, Snapshot, Value, async_trait};
 use roccat::keys::{parse_shortcut, shortcut_label};
 use roccat::kone_aimo::{
     ACTIONS, BUTTON_NAMES, DPI_STAGES, EFFECTS, PROFILES, REPORT_RATES, SLOTS, SPEEDS, VENDOR_ID, Zone, action,
@@ -136,7 +136,7 @@ impl Device for RoccatDevice {
         }
 
         let mut g = Group::new("Profile");
-        g.push(Setting::new(
+        g.push_as(Role::Profile, Setting::new(
             "profile",
             "Onboard profile",
             Kind::choice((0..PROFILES as i64).map(|i| (i, format!("Profile {}", i + 1)))),
@@ -153,8 +153,8 @@ impl Device for RoccatDevice {
                 0
             }
         };
-        perf.push(Setting::new("rate", "Polling rate", Kind::Choice(rates), Value::Int(rate)));
-        perf.push(Setting::new(
+        perf.push_as(Role::PollingRate, Setting::new("rate", "Polling rate", Kind::Choice(rates), Value::Int(rate)));
+        perf.push_as(Role::ActiveStage, Setting::new(
             "stage",
             "Active DPI stage",
             Kind::choice((0..DPI_STAGES as i64).map(|i| (i, format!("Stage {}", i + 1)))),
@@ -174,37 +174,38 @@ impl Device for RoccatDevice {
             if x != y {
                 d = d.help(format!("Y axis: {y} DPI (setting this sets both axes)"));
             }
-            g.push(d);
+            g.push_as(Role::Dpi(i as u8), d);
         }
         out.groups.push(g);
 
         let mut g = Group::new("Lighting");
         if let Some(theme) = s.theme() {
-            g.push(
+            g.push_as(
+                Role::Lighting,
                 Setting::new("theme", "Source", Kind::Info, Value::Text(format!("ROCCAT Swarm theme {theme}")))
                     .help("Changing any lighting setting below switches the mouse to these custom settings"),
             );
         }
         let known_effect = EFFECTS.iter().any(|(e, _)| *e == s.effect());
-        g.push(Setting::new(
+        g.push_as(Role::Lighting, Setting::new(
             "effect",
             "Effect",
             with_current(choices(&EFFECTS), s.effect(), || format!("Effect {}", s.effect())),
             Value::Int(s.effect() as i64),
         ));
-        g.push(Setting::new(
+        g.push_as(Role::Lighting, Setting::new(
             "speed",
             "Effect speed",
             with_current(choices(&SPEEDS), s.speed(), || format!("Speed {}", s.speed())),
             Value::Int(s.speed() as i64),
         ));
-        g.push(Setting::new("brightness", "Brightness", Kind::range(0, 255), Value::Int(s.brightness() as i64)));
+        g.push_as(Role::Lighting, Setting::new("brightness", "Brightness", Kind::range(0, 255), Value::Int(s.brightness() as i64)));
         for (i, z) in Zone::ALL.iter().enumerate() {
             let mut c = Setting::new(format!("color.{i}"), z.name(), Kind::Color, Value::Color(s.color(*z)));
             if !known_effect {
                 c = c.help(format!("Effect {} may ignore these colours; choose Static to see them", s.effect()));
             }
-            g.push(c);
+            g.push_as(Role::Lighting, c);
         }
         out.groups.push(g);
 
@@ -223,18 +224,25 @@ impl Device for RoccatDevice {
             if a == action::MACRO {
                 setting = setting.help("Macros can't be edited here yet; choosing another action replaces it");
             }
+            // Easy-Shift slots are ROCCAT-only, so they stay untagged.
+            let normal_slot = slot < BUTTON_NAMES.len();
+            if normal_slot {
+                setting = setting.role(Role::Button(slot as u8));
+            }
             g.push(setting);
             if a == action::SHORTCUT {
                 let (m, k) = b.shortcut(slot);
-                g.push(
-                    Setting::new(
-                        format!("shortcut.{slot}"),
-                        "  Keys",
-                        Kind::Text { max_len: 60 },
-                        Value::Text(shortcut_label(m, k)),
-                    )
-                    .help("Modifiers and one key joined by +, e.g. Ctrl+Shift+S"),
-                );
+                let mut keys = Setting::new(
+                    format!("shortcut.{slot}"),
+                    "  Keys",
+                    Kind::Text { max_len: 60 },
+                    Value::Text(shortcut_label(m, k)),
+                )
+                .help("Modifiers and one key joined by +, e.g. Ctrl+Shift+S");
+                if normal_slot {
+                    keys = keys.role(Role::ButtonOption(slot as u8));
+                }
+                g.push(keys);
             }
         }
         out.groups.push(normal);

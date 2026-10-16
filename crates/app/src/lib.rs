@@ -3,6 +3,7 @@
 
 use periphery_core::Driver;
 
+mod mouse;
 mod platform;
 pub mod request;
 pub mod ui;

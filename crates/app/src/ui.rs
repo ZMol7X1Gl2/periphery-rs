@@ -10,6 +10,7 @@ use periphery_core::hid::Instant;
 use periphery_core::unknown::UnknownDevice;
 use periphery_core::{DeviceInfo, DeviceKind, KeyPair, KeyPairList, KeyProperty, Keymap, Kind, Setting, Snapshot, Value};
 
+use crate::mouse::{self, MouseTab};
 use crate::platform::{self, ReqSender};
 use crate::request::{self, Existing};
 use crate::worker::{Msg, Req};
@@ -18,7 +19,8 @@ const REFRESH_NOTICE: Duration = Duration::from_secs(3);
 const REFRESH_IDLE: Duration = Duration::from_secs(30);
 const RED: Color32 = Color32::from_rgb(220, 70, 60);
 
-/// What to show first (desktop: `--device <name>`, `--tab keymap[:<setting>]`).
+/// What to show first (desktop: `--device <name>`, `--tab keymap[:<setting>]`
+/// or a mouse tab: `--tab buttons`).
 #[derive(Clone, Debug, Default)]
 pub struct StartOptions {
     /// Preselect the first device whose title contains this (lowercase).
@@ -26,6 +28,7 @@ pub struct StartOptions {
     pub keymap: bool,
     /// Per-key setting or pair list to open on the keymap tab (lowercase).
     pub km: Option<String>,
+    pub mouse_tab: Option<MouseTab>,
 }
 
 impl StartOptions {
@@ -38,6 +41,7 @@ impl StartOptions {
                 "--tab" => {
                     o.keymap = w[1].starts_with("keymap");
                     o.km = w[1].strip_prefix("keymap:").map(str::to_lowercase);
+                    o.mouse_tab = MouseTab::from_name(&w[1]);
                 }
                 _ => {}
             }
@@ -69,6 +73,7 @@ pub struct App {
     /// Dry-run result: source, backup JSON, planned changes.
     restore_plan: Option<(String, String, Vec<String>)>,
     tab: Tab,
+    mouse_tab: MouseTab,
     layer: usize,
     selected_key: Option<(u8, u8)>,
     key_group: usize,
@@ -83,6 +88,7 @@ pub struct App {
     want_keymap: bool,
     /// From `--tab keymap:<name>`: per-key setting or pair list to open.
     want_km: Option<String>,
+    want_mouse_tab: Option<MouseTab>,
 }
 
 /// State of a "Request support" lookup.
@@ -120,6 +126,7 @@ impl App {
             info: None,
             restore_plan: None,
             tab: Tab::Settings,
+            mouse_tab: MouseTab::default(),
             layer: 0,
             selected_key: None,
             key_group: 0,
@@ -131,6 +138,7 @@ impl App {
             want_device: start.device,
             want_keymap: start.keymap,
             want_km: start.km,
+            want_mouse_tab: start.mouse_tab,
         };
         app.send(Req::Discover);
         app
@@ -153,6 +161,7 @@ impl App {
         self.pair_pick.clear();
         self.prop_value = None;
         self.tab = Tab::Settings;
+        self.mouse_tab = MouseTab::default();
         self.send(Req::Select(i));
     }
 
@@ -177,6 +186,9 @@ impl App {
                         self.select(i);
                         if self.want_keymap {
                             self.tab = Tab::Keymap;
+                        }
+                        if let Some(t) = self.want_mouse_tab.take() {
+                            self.mouse_tab = t;
                         }
                     }
                 }
@@ -303,6 +315,11 @@ impl eframe::App for App {
             if let Some(n) = &snap.notice {
                 ui.label(RichText::new(n).color(Color32::from_rgb(220, 160, 40)));
                 ui.add_space(6.0);
+            }
+            let is_mouse = self.selected.and_then(|i| self.devices.get(i)).is_some_and(|d| d.kind == DeviceKind::Mouse);
+            if is_mouse && snap.has_roles() {
+                self.mouse_page(ui);
+                return;
             }
             if snap.keymap.is_some() {
                 ui.horizontal(|ui| {
@@ -481,6 +498,20 @@ impl App {
 // ------------------------------------------------------------------ settings
 
 impl App {
+    fn mouse_page(&mut self, ui: &mut Ui) {
+        let brand = self.selected.and_then(|i| self.devices.get(i)).map_or_else(String::new, |d| d.brand.clone());
+        let Some(mut snap) = self.snap.take() else { return };
+        let mut edits = mouse::Edits::default();
+        mouse::show(ui, &mut snap, &mut self.mouse_tab, &brand, &mut edits);
+        self.snap = Some(snap);
+        for (id, v) in edits.changes {
+            self.queue(&id, v);
+        }
+        if edits.confirm.is_some() {
+            self.confirm = edits.confirm;
+        }
+    }
+
     fn settings_view(&mut self, ui: &mut Ui) {
         let mut snap = self.snap.take().unwrap();
         let mut changes = Vec::new();
@@ -514,13 +545,20 @@ impl App {
     }
 }
 
-fn setting_row(ui: &mut Ui, s: &mut Setting, changes: &mut Vec<(String, Value)>, confirm: &mut Option<(String, String)>) {
-    let label = ui.label(&s.label);
+pub(crate) fn setting_row(ui: &mut Ui, s: &mut Setting, changes: &mut Vec<(String, Value)>, confirm: &mut Option<(String, String)>) {
+    let label = ui.label(s.label.trim());
     if let Some(h) = &s.help {
         label.on_hover_text(h);
     }
+    setting_widget(ui, s, changes, confirm);
+    ui.end_row();
+}
+
+/// The editor for one setting, without its label. Edits go to `changes`;
+/// actions that need confirming go to `confirm`.
+pub(crate) fn setting_widget(ui: &mut Ui, s: &mut Setting, changes: &mut Vec<(String, Value)>, confirm: &mut Option<(String, String)>) {
     let resp = match (&s.kind, &mut s.value) {
-        (Kind::Toggle, Value::Bool(b)) => Some(ui.checkbox(b, "")),
+        (Kind::Toggle, Value::Bool(b)) => Some(toggle_switch(ui, b)),
         (Kind::Range { min, max, step, scale, unit }, Value::Int(v)) => {
             let (scale, unit) = (*scale, unit.clone());
             let slider = egui::Slider::new(v, *min..=*max).step_by(*step as f64).custom_formatter(move |n, _| {
@@ -558,7 +596,7 @@ fn setting_row(ui: &mut Ui, s: &mut Setting, changes: &mut Vec<(String, Value)>,
             None
         }
         (Kind::Action { confirm: c }, _) => {
-            if ui.button(&s.label).clicked() {
+            if ui.button(s.label.trim()).clicked() {
                 match c {
                     Some(text) => *confirm = Some((s.id.clone(), text.clone())),
                     None => changes.push((s.id.clone(), Value::Unit)),
@@ -584,7 +622,27 @@ fn setting_row(ui: &mut Ui, s: &mut Setting, changes: &mut Vec<(String, Value)>,
             changes.push((s.id.clone(), s.value.clone()));
         }
     }
-    ui.end_row();
+}
+
+/// An on/off switch (the egui demo's toggle).
+pub(crate) fn toggle_switch(ui: &mut Ui, on: &mut bool) -> egui::Response {
+    let size = ui.spacing().interact_size.y * egui::vec2(2.0, 1.0);
+    let (rect, mut response) = ui.allocate_exact_size(size, egui::Sense::click());
+    if response.clicked() {
+        *on = !*on;
+        response.mark_changed();
+    }
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *on, ""));
+    if ui.is_rect_visible(rect) {
+        let t = ui.ctx().animate_bool_responsive(response.id, *on);
+        let visuals = ui.style().interact_selectable(&response, *on);
+        let rect = rect.expand(visuals.expansion);
+        let radius = 0.5 * rect.height();
+        ui.painter().rect(rect, radius, visuals.bg_fill, visuals.bg_stroke);
+        let x = egui::lerp((rect.left() + radius)..=(rect.right() - radius), t);
+        ui.painter().circle(egui::pos2(x, rect.center().y), 0.75 * radius, visuals.bg_fill, visuals.fg_stroke);
+    }
+    response
 }
 
 // ------------------------------------------------------------------ keymap
@@ -630,7 +688,7 @@ fn value_editor(ui: &mut Ui, id: &str, kind: &Kind, v: &mut Value) -> bool {
             changed
         }
         (Kind::Color, Value::Color(c)) => ui.color_edit_button_srgb(c).changed(),
-        (Kind::Toggle, Value::Bool(b)) => ui.checkbox(b, "").changed(),
+        (Kind::Toggle, Value::Bool(b)) => toggle_switch(ui, b).changed(),
         _ => false,
     }
 }

@@ -3,7 +3,7 @@
 
 use anyhow::{Result, bail};
 use periphery_core::hid::{Api, DeviceInfo as HidInfo, Filter};
-use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Setting, Snapshot, Value, async_trait};
+use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Role, Setting, Snapshot, Value, async_trait};
 use rongyuan::pan1080::{
     ACTIONS, BUTTONS, DEFAULT_COLORS, DEFAULT_DPIS, DpiStage, Options, REPORT_RATES, action_label,
 };
@@ -140,7 +140,7 @@ impl Device for RongyuanDevice {
         let o = self.mouse.options().await?;
         let profile = o.profile();
         let mut g = Group::new("Profile");
-        g.push(Setting::new(
+        g.push_as(Role::Profile, Setting::new(
             "profile",
             "Onboard profile",
             Kind::choice((0..model.profiles as i64).map(|i| (i, format!("Profile {}", i + 1)))),
@@ -150,10 +150,10 @@ impl Device for RongyuanDevice {
 
         let mut perf = Group::new("Performance");
         if let Some(rate) = o.report_rate() {
-            perf.push(Setting::new("rate", "Polling rate", Kind::Choice(self.rates()), Value::Int(rate as i64)));
+            perf.push_as(Role::PollingRate, Setting::new("rate", "Polling rate", Kind::Choice(self.rates()), Value::Int(rate as i64)));
         }
         let dpi = self.mouse.dpi(profile).await?;
-        perf.push(Setting::new(
+        perf.push_as(Role::StageCount, Setting::new(
             "stages",
             "DPI stages",
             Kind::range(1, model.stages as i64),
@@ -161,7 +161,8 @@ impl Device for RongyuanDevice {
         ));
         // Read-only: the AJ179 PRO ignores the active-stage byte of a `54`
         // write (the stage only changes with the DPI button).
-        perf.push(
+        perf.push_as(
+            Role::ActiveStage,
             Setting::new("stage", "Active stage", Kind::Info, Value::Text(format!("Stage {}", dpi.current + 1)))
                 .help("Change it with the DPI button on the mouse"),
         );
@@ -178,26 +179,27 @@ impl Device for RongyuanDevice {
             if s.x != s.y {
                 dpi_setting = dpi_setting.help(format!("Y axis: {} DPI (setting this sets both axes)", s.y));
             }
-            g.push(dpi_setting);
-            g.push(Setting::new(format!("color.{i}"), format!("Stage {} colour", i + 1), Kind::Color, Value::Color(s.color)));
+            g.push_as(Role::Dpi(i as u8), dpi_setting);
+            g.push_as(Role::StageColor(i as u8), Setting::new(format!("color.{i}"), format!("Stage {} colour", i + 1), Kind::Color, Value::Color(s.color)));
         }
         out.groups.push(g);
 
         let mut g = Group::new("Sensor");
         let lods = model.sensor.lod_mm();
         if !lods.is_empty() {
-            g.push(Setting::new(
+            g.push_as(Role::LiftOff, Setting::new(
                 "lod",
                 "Lift-off distance",
                 Kind::choice(lods.iter().enumerate().map(|(i, mm)| (i as i64, format!("{mm} mm")))),
                 Value::Int(o.lod() as i64),
             ));
         }
-        g.push(
+        g.push_as(
+            Role::AngleSnap,
             Setting::toggle("angle_snap", "Angle snapping", o.angle_snap())
                 .help("Straightens slightly diagonal movements"),
         );
-        g.push(Setting::toggle("ripple", "Ripple control", o.ripple()));
+        g.push_as(Role::Ripple, Setting::toggle("ripple", "Ripple control", o.ripple()));
         out.groups.push(g);
 
         let buttons = self.mouse.buttons(profile).await?;
@@ -212,12 +214,12 @@ impl Device for RongyuanDevice {
                     CHOICE_OTHER
                 }
             };
-            g.push(Setting::new(format!("key.{k}"), *name, Kind::Choice(options), Value::Int(value)));
+            g.push_as(Role::Button(k as u8), Setting::new(format!("key.{k}"), *name, Kind::Choice(options), Value::Int(value)));
         }
         out.groups.push(g);
 
         let mut g = Group::new("Maintenance");
-        g.push(Setting::action("reset", "Factory reset", Some("Reset every setting on the mouse to factory defaults?")));
+        g.push_as(Role::FactoryReset, Setting::action("reset", "Factory reset", Some("Reset every setting on the mouse to factory defaults?")));
         out.groups.push(g);
         Ok(out)
     }

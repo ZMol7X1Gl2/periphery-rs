@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 use logitech_hidpp::profile::{Binding, DPI_STAGES, LED_SLOTS, Led, NAME_LEN, Profile, effect, special};
 use logitech_hidpp::{Charging, Device as Hidpp, DpiInfo, LedZone, Mode, OnboardInfo, ROM_BASE};
 use periphery_core::hid::{Api, Filter};
-use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Setting, Snapshot, Value, async_trait};
+use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Role, Setting, Snapshot, Value, async_trait};
 
 pub struct LogitechDriver;
 
@@ -215,7 +215,8 @@ impl LogitechMouse {
         }
         let mut g = Group::new("Onboard profiles");
         let label = if mode == Mode::Onboard { "Active profile" } else { "Profile to edit" };
-        g.push(
+        g.push_as(
+            Role::Profile,
             Setting::new("onboard.profile", label, Kind::Choice(names), Value::Int(sector as i64))
                 .help("Profiles stored on the mouse; used when the mode is Onboard memory"),
         );
@@ -235,24 +236,29 @@ impl LogitechMouse {
             out.groups.push(g);
             return Ok(());
         }
+        // In software mode the live settings are the ones in effect, so the
+        // profile is shown as device-specific and only the live ones get roles.
+        let onboard = mode == Mode::Onboard;
+        let tag = |s: Setting, role: Role| if onboard { s.role(role) } else { s };
         let mut g = Group::new(format!("Profile {sector}"));
         g.push(Setting::new("p.name", "Name", Kind::Text { max_len: NAME_LEN }, Value::Text(p.name())));
         if !intervals.is_empty() {
-            g.push(Setting::new("p.rate", "Polling rate", Self::rate_kind(intervals), Value::Int(p.report_interval() as i64)));
+            g.push(tag(Setting::new("p.rate", "Polling rate", Self::rate_kind(intervals), Value::Int(p.report_interval() as i64)), Role::PollingRate));
         }
         if let Some(d) = dpi {
             for i in 0..DPI_STAGES {
                 let v = p.dpi(i);
                 if v != 0 {
-                    g.push(Setting::new(format!("p.dpi.{i}"), format!("DPI stage {}", i + 1), Self::dpi_kind(d), Value::Int(v as i64)));
+                    g.push(tag(Setting::new(format!("p.dpi.{i}"), format!("DPI stage {}", i + 1), Self::dpi_kind(d), Value::Int(v as i64)), Role::Dpi(i as u8)));
                 }
             }
         }
         let stages = || Kind::choice((0..DPI_STAGES as i64).filter(|i| p.dpi(*i as usize) != 0).map(|i| (i, format!("Stage {}", i + 1))));
-        g.push(
+        g.push(tag(
             Setting::new("p.default", "Default DPI stage", stages(), Value::Int(p.default_dpi_stage() as i64))
                 .help("Stage the mouse starts in when this profile loads; changing it also switches to it now"),
-        );
+            Role::ActiveStage,
+        ));
         g.push(
             Setting::new("p.shift", "DPI shift stage", stages(), Value::Int(p.shift_dpi_stage() as i64))
                 .help("DPI used while a button set to “DPI shift” is held"),
@@ -276,10 +282,11 @@ impl LogitechMouse {
             if let Some(o) = other {
                 opts.push((CHOICE_OTHER, o));
             }
-            b.push(
+            b.push(tag(
                 Setting::new(format!("p.button.{i}"), BUTTON_NAMES[i], Kind::Choice(opts), Value::Int(value))
                     .help("Stored in the onboard profile. DPI and profile functions use libratbag's documented codes."),
-            );
+                Role::Button(i as u8),
+            ));
         }
         b.push(Setting::action(
             "p.factory",
@@ -322,7 +329,8 @@ impl Device for LogitechMouse {
 
         if self.onboard.is_some() {
             let mut g = Group::new("Mode");
-            g.push(
+            g.push_as(
+                Role::SettingsSource,
                 Setting::new(
                     "mode",
                     "Settings come from",
@@ -340,13 +348,14 @@ impl Device for LogitechMouse {
         if mode == Mode::Host {
             let mut g = Group::new("Live settings");
             if let Some(d) = &dpi {
-                g.push(
+                g.push_as(
+                    Role::Dpi(0),
                     Setting::new("live.dpi", "DPI", Self::dpi_kind(d), Value::Int(self.dev.dpi().await? as i64))
                         .help("Applies immediately but isn't stored on the mouse"),
                 );
             }
             if !rates.is_empty() {
-                g.push(Setting::new("live.rate", "Polling rate", Self::hz_kind(&rates), Value::Int(self.dev.report_rate().await? as i64)));
+                g.push_as(Role::PollingRate, Setting::new("live.rate", "Polling rate", Self::hz_kind(&rates), Value::Int(self.dev.report_rate().await? as i64)));
             }
             for i in 0..self.zones.len() {
                 let zone = self.zones[i].clone();

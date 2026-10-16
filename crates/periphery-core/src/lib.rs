@@ -116,6 +116,40 @@ impl Kind {
     }
 }
 
+/// What a setting means, so the UI can lay out every brand's mouse the same
+/// way. Settings without a role are device-specific and shown in their own
+/// section under their group's name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    /// Onboard profile selector.
+    Profile,
+    /// Where the settings come from (onboard memory or software).
+    SettingsSource,
+    /// Polling rate in Hz (a [`Kind::Choice`] whose values are Hz).
+    PollingRate,
+    /// Number of enabled DPI stages ([`Kind::Range`]).
+    StageCount,
+    /// Selected DPI stage ([`Kind::Choice`] of stage indices).
+    ActiveStage,
+    /// DPI of stage n.
+    Dpi(u8),
+    /// Indicator colour of DPI stage n.
+    StageColor(u8),
+    /// Binding of button n.
+    Button(u8),
+    /// Extra option for button n's binding (macro text, fire rate…).
+    ButtonOption(u8),
+    LiftOff,
+    Debounce,
+    MotionSync,
+    AngleSnap,
+    Ripple,
+    Lighting,
+    Sleep,
+    Wireless,
+    FactoryReset,
+}
+
 #[derive(Clone, Debug)]
 pub struct Setting {
     pub id: String,
@@ -123,11 +157,17 @@ pub struct Setting {
     pub help: Option<String>,
     pub kind: Kind,
     pub value: Value,
+    pub role: Option<Role>,
 }
 
 impl Setting {
     pub fn new(id: impl Into<String>, label: impl Into<String>, kind: Kind, value: Value) -> Self {
-        Setting { id: id.into(), label: label.into(), help: None, kind, value }
+        Setting { id: id.into(), label: label.into(), help: None, kind, value, role: None }
+    }
+
+    pub fn role(mut self, role: Role) -> Self {
+        self.role = Some(role);
+        self
     }
 
     pub fn toggle(id: impl Into<String>, label: impl Into<String>, on: bool) -> Self {
@@ -173,6 +213,11 @@ impl Group {
 
     pub fn push(&mut self, s: Setting) {
         self.settings.push(s);
+    }
+
+    /// Pushes `s` tagged with `role`.
+    pub fn push_as(&mut self, role: Role, s: Setting) {
+        self.settings.push(s.role(role));
     }
 }
 
@@ -266,6 +311,11 @@ pub struct Snapshot {
 impl Snapshot {
     pub fn find(&self, id: &str) -> Option<&Setting> {
         self.groups.iter().flat_map(|g| g.settings.iter()).find(|s| s.id == id)
+    }
+
+    /// Whether the driver tagged any setting with a [`Role`].
+    pub fn has_roles(&self) -> bool {
+        self.groups.iter().flat_map(|g| &g.settings).any(|s| s.role.is_some())
     }
 }
 

@@ -1,0 +1,56 @@
+name: Desktop preview
+
+# Builds the Windows desktop app for every branch except master and attaches
+# it to the run as an artifact, so a branch (UI work, a new device) can be
+# tried on real hardware without making a release. Download it from the run's
+# Summary page; artifacts expire after 14 days. The web preview of the same
+# branch comes from pages.yml.
+on:
+  push:
+    branches: ["**", "!master", "!gh-pages"]
+  workflow_dispatch:
+
+# A newer push to the same branch replaces the build in progress.
+concurrency:
+  group: preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Name
+        id: name
+        shell: bash
+        run: |
+          slug="$(echo "$GITHUB_REF_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')"
+          echo "artifact=periphery-$slug-${GITHUB_SHA::7}-windows-x64" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Build
+        run: cargo build --release --locked --bin periphery --bin periphery-cli
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.artifact }}
+          retention-days: 14
+          path: |
+            target/release/periphery.exe
+            target/release/periphery-cli.exe
+            README.md
+            CHANGELOG.md
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "Desktop build of \`$GITHUB_REF_NAME\` ($GITHUB_SHA): download **${{ steps.name.outputs.artifact }}** below."
+            echo "Not a release: unsigned, and no changelog entry was promoted."
+          } >> "$GITHUB_STEP_SUMMARY"

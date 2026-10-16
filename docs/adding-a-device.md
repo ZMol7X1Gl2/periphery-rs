@@ -169,6 +169,17 @@ Guidelines:
   (`Group::new("Sensor")`). Put read-only facts (battery, firmware,
   connection) in `status`. If the device can't be configured right now
   (asleep, offline), return a `notice` instead of failing.
+- **Mice: tag standard settings with a `Role`** (`group.push_as(Role::Dpi(0),
+  …)` or `setting.role(…)`). The GUI shows a mouse with tagged settings on
+  one shared page whatever the brand: profile and settings source above
+  the tabs, then *DPI & polling* (`PollingRate`, `StageCount`,
+  `ActiveStage`, `Dpi(n)`, `StageColor(n)`), *Buttons* (`Button(n)`, with
+  `ButtonOption(n)` for its sub-settings), *Sensor* (`LiftOff`,
+  `MotionSync`, `AngleSnap`, `Ripple`, `Debounce`), *Lighting* and *Power &
+  device* (`Sleep`, `Wireless`, `FactoryReset`). Leave settings only your
+  brand has untagged: they go on the brand's own tab under their group
+  name. Tag only the settings that are in effect right now; Logitech, for
+  example, tags the live DPI in software mode and the profile's otherwise.
 - **Setting ids** are stable strings (`"dpi.2"`, `"he.actuation"`). They are
   saved in backups, so don't rename them casually. An id ending in
   `.profile` (or exactly `profile`) is restored before everything else —
