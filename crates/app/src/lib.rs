@@ -7,6 +7,7 @@ mod mouse;
 mod mouse_diagram;
 mod platform;
 pub mod request;
+mod theme;
 pub mod ui;
 pub mod worker;
 

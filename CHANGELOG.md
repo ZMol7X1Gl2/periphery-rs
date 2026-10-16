@@ -43,6 +43,12 @@ release workflow turns Unreleased into the new version.
   shortcut keys appear under the chosen action. Only the buttons the mouse
   has are drawn: side, thumb, wheel tilt and scroll, top and underside
   buttons.
+- New look: a darker theme with one accent colour, a sidebar listing each
+  device with its kind and brand, the device's status (battery, firmware,
+  connection) as chips under its name, pill-shaped tabs, rounded cards and
+  coloured banners for notices and errors. Factory reset is a red button
+  of its own, and action rows say Start… or Run instead of repeating
+  their name.
 - On/off settings are switches instead of checkboxes.
 
 ## [0.3.0-rc.2] - 2026-10-15

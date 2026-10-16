@@ -9,6 +9,7 @@ use eframe::egui::{self, RichText, Ui};
 use periphery_core::{ButtonPos, Group, Kind, Role, Setting, Snapshot, Value};
 
 use crate::mouse_diagram::{self, ButtonInfo};
+use crate::theme::{self, card};
 use crate::ui::{setting_row, setting_widget};
 
 /// Polling rates with at most this many choices show as a row of buttons.
@@ -63,7 +64,7 @@ impl MouseTab {
             MouseTab::Sensor => "Sensor".into(),
             MouseTab::Lighting => "Lighting".into(),
             MouseTab::Device => "Power & device".into(),
-            MouseTab::Specific => format!("📁 {brand}-specific"),
+            MouseTab::Specific => format!("{brand}-specific"),
         }
     }
 }
@@ -167,16 +168,11 @@ pub fn show(ui: &mut Ui, snap: &mut Snapshot, state: &mut MouseState, brand: &st
     // Keep the user's tab while it's missing (a sleeping mouse reports
     // little), so it comes back when the mouse wakes.
     let mut shown = if tabs.contains(tab) { *tab } else { *first };
-    ui.horizontal_wrapped(|ui| {
-        for t in &tabs {
-            let label = RichText::new(t.title(brand)).size(15.0);
-            if ui.add(egui::SelectableLabel::new(shown == *t, label)).clicked() {
-                shown = *t;
-                *tab = *t;
-            }
-        }
-    });
-    ui.separator();
+    let items: Vec<(MouseTab, String)> = tabs.iter().map(|t| (*t, t.title(brand))).collect();
+    if theme::segmented(ui, &mut shown, &items) {
+        *tab = shown;
+    }
+    ui.add_space(10.0);
 
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.set_max_width(MAX_WIDTH);
@@ -223,16 +219,6 @@ fn profile_bar(ui: &mut Ui, groups: &mut [Group], e: &mut Edits) {
     ui.add_space(4.0);
 }
 
-fn card(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui)) {
-    egui::Frame::group(ui.style()).inner_margin(12.0).rounding(6.0).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.label(RichText::new(title).strong().size(15.0));
-        ui.add_space(6.0);
-        add(ui);
-    });
-    ui.add_space(10.0);
-}
-
 /// A label/editor grid of the settings whose role matches, in driver order.
 fn rows(ui: &mut Ui, id: &str, groups: &mut [Group], e: &mut Edits, pick: impl Fn(Option<Role>) -> bool) {
     egui::Grid::new(id).num_columns(2).spacing([14.0, 10.0]).show(ui, |ui| {
@@ -250,42 +236,41 @@ fn buttons(ui: &mut Ui, groups: &mut [Group], selected: &mut Option<ButtonPos>, 
             _ => None,
         })
         .collect();
-    if selected.is_some_and(|b| !infos.contains_key(&b)) {
-        *selected = None;
+    // Start on the first button so the page always has something to edit.
+    if selected.is_none_or(|b| !infos.contains_key(&b)) {
+        *selected = infos.keys().next().copied();
     }
     let mut pick = None;
     ui.horizontal_top(|ui| {
-        ui.vertical(|ui| {
-            ui.set_width(250.0);
-            pick = mouse_diagram::show(ui, &infos, *selected);
-            ui.add_space(6.0);
-            egui::Grid::new("button-list").num_columns(2).spacing([10.0, 4.0]).show(ui, |ui| {
-                for (pos, info) in &infos {
-                    let on = *selected == Some(*pos);
-                    let name = if on { RichText::new(&info.name) } else { RichText::new(&info.name).weak() };
-                    if ui.selectable_label(on, name).clicked()
-                        | ui.selectable_label(on, &info.binding).clicked()
-                    {
-                        pick = Some(*pos);
+        ui.allocate_ui_with_layout(egui::vec2(290.0, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+            card(ui, "", |ui| {
+                ui.vertical_centered(|ui| pick = mouse_diagram::show(ui, &infos, *selected));
+                ui.add_space(6.0);
+                egui::Grid::new("button-list").num_columns(2).spacing([10.0, 4.0]).show(ui, |ui| {
+                    for (pos, info) in &infos {
+                        let on = *selected == Some(*pos);
+                        let name = if on { RichText::new(&info.name) } else { RichText::new(&info.name).weak() };
+                        if ui.selectable_label(on, name).clicked() | ui.selectable_label(on, &info.binding).clicked() {
+                            pick = Some(*pos);
+                        }
+                        ui.end_row();
                     }
-                    ui.end_row();
-                }
+                });
             });
         });
-        ui.add_space(12.0);
         ui.vertical(|ui| {
-            let Some(pos) = *selected else {
-                ui.add_space(40.0);
-                ui.label(RichText::new("Click a button on the mouse to choose what it does.").weak().size(14.0));
-                return;
-            };
-            if let Some(s) = with_role(groups, Role::Button(pos)) {
-                button_editor(ui, s, picker, e);
-            }
-            if settings(groups).any(|s| s.role == Some(Role::ButtonOption(pos))) {
-                ui.add_space(8.0);
-                card(ui, "Options", |ui| rows(ui, "button-options", groups, e, |r| r == Some(Role::ButtonOption(pos))));
-            }
+            let Some(pos) = *selected else { return };
+            card(ui, "", |ui| {
+                if let Some(s) = with_role(groups, Role::Button(pos)) {
+                    button_editor(ui, s, picker, e);
+                }
+                if settings(groups).any(|s| s.role == Some(Role::ButtonOption(pos))) {
+                    ui.add_space(10.0);
+                    ui.label(RichText::new("Options").strong());
+                    ui.add_space(4.0);
+                    rows(ui, "button-options", groups, e, |r| r == Some(Role::ButtonOption(pos)));
+                }
+            });
         });
     });
     if let Some(p) = pick {
@@ -495,7 +480,14 @@ fn device(ui: &mut Ui, groups: &mut [Group], e: &mut Edits) {
         card(ui, "Reset", |ui| {
             ui.label(RichText::new("Puts every setting on the mouse back to how it left the factory.").weak());
             ui.add_space(4.0);
-            setting_widget(ui, s, &mut e.changes, &mut e.confirm);
+            let button = egui::Button::new(RichText::new(format!("{}…", s.label.trim())).color(egui::Color32::WHITE))
+                .fill(egui::Color32::from_rgb(180, 60, 55));
+            if ui.add(button).clicked() {
+                match &s.kind {
+                    Kind::Action { confirm: Some(q) } => e.confirm = Some((s.id.clone(), q.clone())),
+                    _ => e.changes.push((s.id.clone(), Value::Unit)),
+                }
+            }
         });
     }
 }

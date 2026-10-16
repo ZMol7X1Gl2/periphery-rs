@@ -13,6 +13,7 @@ use periphery_core::{DeviceInfo, DeviceKind, KeyPair, KeyPairList, KeyProperty, 
 use crate::mouse::{self, MouseState, MouseTab};
 use crate::platform::{self, ReqSender};
 use crate::request::{self, Existing};
+use crate::theme;
 use crate::worker::{Msg, Req};
 
 const REFRESH_NOTICE: Duration = Duration::from_secs(3);
@@ -106,6 +107,7 @@ enum Tab {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext, start: StartOptions) -> Self {
+        theme::apply(&cc.egui_ctx);
         let (local, rx) = channel();
         let tx = platform::spawn_worker(local.clone(), cc.egui_ctx.clone());
         let mut app = App {
@@ -237,6 +239,41 @@ fn kind_icon(k: DeviceKind) -> &'static str {
     }
 }
 
+fn kind_name(k: DeviceKind) -> &'static str {
+    match k {
+        DeviceKind::Mouse => "Mouse",
+        DeviceKind::Keyboard => "Keyboard",
+        DeviceKind::Headset => "Headset",
+        DeviceKind::Other => "Device",
+    }
+}
+
+/// One device in the sidebar: icon, name, and kind · brand underneath.
+fn device_row(ui: &mut Ui, d: &DeviceInfo, selected: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 50.0), egui::Sense::click());
+    let v = ui.visuals().clone();
+    let painter = ui.painter();
+    if selected {
+        painter.rect_filled(rect, 8.0, theme::ACCENT.gamma_multiply(0.22));
+        let bar = egui::Rect::from_min_size(rect.left_top() + egui::vec2(0.0, 12.0), egui::vec2(3.0, rect.height() - 24.0));
+        painter.rect_filled(bar, 2.0, theme::ACCENT);
+    } else if resp.hovered() {
+        painter.rect_filled(rect, 8.0, v.widgets.hovered.weak_bg_fill);
+    }
+    let text = v.text_color();
+    painter.text(rect.left_center() + egui::vec2(22.0, 0.0), egui::Align2::CENTER_CENTER, kind_icon(d.kind), egui::FontId::proportional(20.0), text);
+    let x = rect.left() + 44.0;
+    let width = rect.right() - x - 6.0;
+    let title = ui.fonts(|f| f.layout(d.title(), egui::FontId::proportional(14.0), text, width));
+    let sub = format!("{} · {}", kind_name(d.kind), d.brand);
+    let sub = ui.fonts(|f| f.layout(sub, egui::FontId::proportional(11.5), v.weak_text_color(), width));
+    let title_h = title.size().y;
+    let top = rect.center().y - (title_h + sub.size().y + 2.0) / 2.0;
+    painter.galley(egui::pos2(x, top), title, text);
+    painter.galley(egui::pos2(x, top + title_h + 2.0), sub, text);
+    resp.on_hover_text(format!("{} ({:04x}:{:04x})", d.title(), d.vid, d.pid))
+}
+
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll();
@@ -258,14 +295,18 @@ impl eframe::App for App {
         }
         ctx.request_repaint_after(Duration::from_millis(500));
 
-        egui::SidePanel::left("devices").resizable(false).exact_width(220.0).show(ctx, |ui| {
-            ui.add_space(8.0);
-            ui.heading("Periphery");
-            ui.add_space(8.0);
+        let side = egui::Frame::none().fill(ctx.style().visuals.extreme_bg_color).inner_margin(egui::Margin::same(12.0));
+        egui::SidePanel::left("devices").resizable(false).exact_width(240.0).frame(side).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                theme::logo(ui, 24.0);
+                ui.label(RichText::new("Periphery").size(20.0).strong());
+            });
+            ui.add_space(14.0);
+            ui.label(RichText::new("DEVICES").small().weak());
+            ui.add_space(2.0);
             let mut pick = None;
             for (i, d) in self.devices.iter().enumerate() {
-                let text = format!("{}  {}", kind_icon(d.kind), d.title());
-                if ui.selectable_label(self.selected == Some(i), text).clicked() {
+                if device_row(ui, d, self.selected == Some(i)).clicked() {
                     pick = Some(i);
                 }
             }
@@ -275,8 +316,11 @@ impl eframe::App for App {
             if let Some(i) = pick {
                 self.select(i);
             }
-            ui.add_space(8.0);
-            if platform::ASKS_FOR_DEVICES && ui.button("＋ Connect a device…").on_hover_text("Choose devices to give this page access to").clicked() {
+            ui.add_space(10.0);
+            let full = egui::vec2(ui.available_width(), 32.0);
+            if platform::ASKS_FOR_DEVICES
+                && ui.add(egui::Button::new("＋  Connect a device…").min_size(full)).on_hover_text("Choose devices to give this page access to").clicked()
+            {
                 self.send(Req::Request(false));
             }
             if platform::ASKS_FOR_DEVICES
@@ -284,7 +328,7 @@ impl eframe::App for App {
             {
                 self.send(Req::Request(true));
             }
-            if ui.button("⟳ Rescan").clicked() {
+            if ui.add(egui::Button::new("⟳  Rescan").min_size(full)).clicked() {
                 self.send(Req::Discover);
             }
             for e in &self.discover_errors {
@@ -293,16 +337,16 @@ impl eframe::App for App {
             self.unknown_list(ui);
         });
 
-        egui::TopBottomPanel::top("header").show(ctx, |ui| {
-            ui.add_space(6.0);
+        let header = egui::Frame::none().fill(ctx.style().visuals.panel_fill).inner_margin(egui::Margin { left: 20.0, right: 16.0, top: 14.0, bottom: 10.0 });
+        egui::TopBottomPanel::top("header").frame(header).show_separator_line(false).show(ctx, |ui| {
             self.header(ui);
-            ui.add_space(6.0);
         });
 
         self.confirm_window(ctx);
         self.restore_window(ctx);
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        let central = egui::Frame::none().fill(ctx.style().visuals.panel_fill).inner_margin(egui::Margin { left: 20.0, right: 16.0, top: 4.0, bottom: 8.0 });
+        egui::CentralPanel::default().frame(central).show(ctx, |ui| {
             let Some(snap) = &self.snap else {
                 if self.selected.is_some() {
                     ui.vertical_centered(|ui| {
@@ -313,8 +357,8 @@ impl eframe::App for App {
                 return;
             };
             if let Some(n) = &snap.notice {
-                ui.label(RichText::new(n).color(Color32::from_rgb(220, 160, 40)));
-                ui.add_space(6.0);
+                theme::banner(ui, theme::WARN, n, false);
+                ui.add_space(8.0);
             }
             let is_mouse = self.selected.and_then(|i| self.devices.get(i)).is_some_and(|d| d.kind == DeviceKind::Mouse);
             if is_mouse && snap.has_roles() {
@@ -322,11 +366,8 @@ impl eframe::App for App {
                 return;
             }
             if snap.keymap.is_some() {
-                ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.tab, Tab::Settings, "Settings");
-                    ui.selectable_value(&mut self.tab, Tab::Keymap, "Keymap");
-                });
-                ui.separator();
+                theme::segmented(ui, &mut self.tab, &[(Tab::Settings, "Settings".into()), (Tab::Keymap, "Keymap".into())]);
+                ui.add_space(8.0);
             }
             egui::ScrollArea::vertical().show(ui, |ui| match self.tab {
                 Tab::Keymap if self.snap.as_ref().is_some_and(|s| s.keymap.is_some()) => self.keymap_view(ui),
@@ -342,8 +383,10 @@ impl App {
     fn header(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             if let Some(d) = self.selected.and_then(|i| self.devices.get(i)) {
-                ui.heading(d.title());
-                ui.label(RichText::new(format!("{:04x}:{:04x}", d.vid, d.pid)).weak());
+                ui.label(RichText::new(d.title()).size(24.0).strong());
+                if self.busy > 0 || !self.pending.is_empty() {
+                    ui.spinner().on_hover_text("Talking to the device…");
+                }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let dev = self.selected;
@@ -356,40 +399,31 @@ impl App {
                         self.send(Req::Backup(dev.unwrap(), target));
                     }
                 }
-                if ui.button("⟳ Refresh").clicked() {
+                if ui.add(egui::Button::new("⟳")).on_hover_text("Read the device again").clicked() {
                     self.send(Req::Refresh);
-                }
-                if self.busy > 0 || !self.pending.is_empty() {
-                    ui.spinner();
                 }
             });
         });
         if let Some(s) = &self.snap {
+            ui.add_space(2.0);
             ui.horizontal_wrapped(|ui| {
-                for (i, (k, v)) in s.status.iter().enumerate() {
-                    if i > 0 {
-                        ui.separator();
-                    }
-                    ui.label(RichText::new(format!("{k}:")).weak());
-                    ui.label(v);
+                ui.spacing_mut().item_spacing.x = 6.0;
+                for (k, v) in &s.status {
+                    theme::chip(ui, k, v);
                 }
             });
         }
         if let Some(i) = self.info.clone() {
-            ui.horizontal(|ui| {
-                ui.colored_label(Color32::from_rgb(70, 170, 90), i);
-                if ui.small_button("✕").clicked() {
-                    self.info = None;
-                }
-            });
+            ui.add_space(6.0);
+            if theme::banner(ui, theme::GOOD, &i, true) {
+                self.info = None;
+            }
         }
         if let Some(e) = self.error.clone() {
-            ui.horizontal(|ui| {
-                ui.colored_label(RED, format!("⚠ {e}"));
-                if ui.small_button("✕").clicked() {
-                    self.error = None;
-                }
-            });
+            ui.add_space(6.0);
+            if theme::banner(ui, RED, &format!("⚠  {e}"), true) {
+                self.error = None;
+            }
         }
     }
 
@@ -398,9 +432,8 @@ impl App {
         if self.unknown.is_empty() {
             return;
         }
-        ui.add_space(12.0);
-        ui.separator();
-        ui.label(RichText::new("Not supported yet").strong());
+        ui.add_space(16.0);
+        ui.label(RichText::new("NOT SUPPORTED YET").small().weak());
         let mut lookup = None;
         for d in &self.unknown {
             ui.add_space(4.0);
@@ -521,17 +554,15 @@ impl App {
         ui.columns(2, |cols| {
             for (gi, g) in groups.iter_mut().enumerate() {
                 let ui = &mut cols[gi % 2];
-                egui::Frame::group(ui.style()).inner_margin(10.0).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.label(RichText::new(&g.label).strong().size(15.0));
-                    ui.add_space(6.0);
-                    egui::Grid::new(("group", gi)).num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
+                // Leave room for the label and the value box so cards don't overlap.
+                ui.spacing_mut().slider_width = (ui.available_width() - 300.0).clamp(80.0, 220.0);
+                theme::card(ui, &g.label, |ui| {
+                    egui::Grid::new(("group", gi)).num_columns(2).spacing([14.0, 10.0]).show(ui, |ui| {
                         for s in &mut g.settings {
                             setting_row(ui, s, &mut changes, &mut confirm);
                         }
                     });
                 });
-                ui.add_space(8.0);
             }
         });
         snap.groups = groups;
@@ -596,7 +627,9 @@ pub(crate) fn setting_widget(ui: &mut Ui, s: &mut Setting, changes: &mut Vec<(St
             None
         }
         (Kind::Action { confirm: c }, _) => {
-            if ui.button(s.label.trim()).clicked() {
+            // The row's label already names the action.
+            let text = if c.is_some() { "Start…" } else { "Run" };
+            if ui.button(text).clicked() {
                 match c {
                     Some(text) => *confirm = Some((s.id.clone(), text.clone())),
                     None => changes.push((s.id.clone(), Value::Unit)),
