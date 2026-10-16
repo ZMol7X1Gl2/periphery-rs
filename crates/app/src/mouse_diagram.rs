@@ -5,7 +5,9 @@
 
 use std::collections::BTreeMap;
 
-use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
+use std::sync::OnceLock;
+
+use eframe::egui::{self, Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use periphery_core::ButtonPos;
 
 /// Half the body length in points.
@@ -23,10 +25,55 @@ pub struct ButtonInfo {
     pub binding: String,
 }
 
-/// Half the body width at height `y` (-1 front … 1 back): an egg, wider at
-/// the back.
+/// The right half of the outline, front to back: a blunt nose, nearly
+/// straight sides with a slight waist for the grip, and a wider round back.
+const OUTLINE: [(f32, f32); 14] = [
+    (0.0, -1.0),
+    (0.2, -0.985),
+    (0.34, -0.93),
+    (0.42, -0.8),
+    (0.45, -0.6),
+    (0.45, -0.35),
+    (0.43, -0.1),
+    (0.42, 0.12),
+    (0.44, 0.35),
+    (0.47, 0.58),
+    (0.46, 0.78),
+    (0.38, 0.93),
+    (0.22, 1.0),
+    (0.0, 1.02),
+];
+
+/// [`OUTLINE`] smoothed with a Catmull-Rom spline.
+fn right_side() -> &'static [Pos2] {
+    static SIDE: OnceLock<Vec<Pos2>> = OnceLock::new();
+    SIDE.get_or_init(|| {
+        let p: Vec<Pos2> = OUTLINE.iter().map(|(x, y)| pos2(*x, *y)).collect();
+        let at = |i: isize| p[i.clamp(0, p.len() as isize - 1) as usize];
+        let mut out = Vec::new();
+        for i in 0..p.len() as isize - 1 {
+            let (p0, p1, p2, p3) = (at(i - 1), at(i), at(i + 1), at(i + 2));
+            for k in 0..8 {
+                let t = k as f32 / 8.0;
+                let (t2, t3) = (t * t, t * t * t);
+                let c = |a: f32, b: f32, c: f32, d: f32| {
+                    0.5 * (2.0 * b + (c - a) * t + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2 + (3.0 * b - a - 3.0 * c + d) * t3)
+                };
+                out.push(pos2(c(p0.x, p1.x, p2.x, p3.x), c(p0.y, p1.y, p2.y, p3.y)));
+            }
+        }
+        out.push(*p.last().unwrap());
+        out
+    })
+}
+
+/// Half the body width at height `y` (-1 front … about 1 back).
 fn half_width(y: f32) -> f32 {
-    0.6 * (1.0 - y * y).max(0.0).sqrt() * (0.88 + 0.12 * y)
+    let side = right_side();
+    match side.windows(2).find(|w| (w[0].y..=w[1].y).contains(&y)) {
+        Some(w) => egui::lerp(w[0].x..=w[1].x, (y - w[0].y) / (w[1].y - w[0].y).max(1e-6)),
+        None => 0.0,
+    }
 }
 
 fn steps(from: f32, to: f32, n: usize) -> impl Iterator<Item = f32> {
@@ -34,9 +81,26 @@ fn steps(from: f32, to: f32, n: usize) -> impl Iterator<Item = f32> {
 }
 
 fn body() -> Vec<Pos2> {
-    let right = steps(-1.0, 1.0, 48).map(|y| pos2(half_width(y), y));
-    let left = steps(1.0, -1.0, 48).map(|y| pos2(-half_width(y), y));
-    right.chain(left).collect()
+    let side = right_side();
+    side.iter().copied().chain(side.iter().rev().map(|p| pos2(-p.x, p.y))).collect()
+}
+
+/// Fills a polygon that is star-shaped around its centroid (the outline has
+/// a waist, so it isn't convex) and strokes its edge.
+fn polygon(painter: &Painter, pts: &[Pos2], fill: Color32, stroke: Stroke) {
+    let centre = pts.iter().fold(egui::Vec2::ZERO, |acc, p| acc + p.to_vec2()) / pts.len() as f32;
+    let mut mesh = Mesh::default();
+    mesh.colored_vertex(centre.to_pos2(), fill);
+    for p in pts {
+        mesh.colored_vertex(*p, fill);
+    }
+    let n = pts.len() as u32;
+    for i in 0..n {
+        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+    }
+    painter.add(Shape::mesh(mesh));
+    let edge = if stroke.width > 0.0 { stroke } else { Stroke::new(1.0_f32, fill) };
+    painter.add(Shape::closed_line(pts.to_vec(), edge));
 }
 
 /// The left main button; the right one is its mirror image.
@@ -135,21 +199,21 @@ pub fn show(ui: &mut Ui, buttons: &BTreeMap<ButtonPos, ButtonInfo>, selected: Op
     let mut clicked = None;
 
     let shell = mix(v.panel_fill, v.widgets.inactive.weak_bg_fill, 0.45);
-    painter.add(Shape::convex_polygon(screen(&body()), shell, Stroke::new(1.5_f32, outline.color)));
-    painter.add(Shape::convex_polygon(screen(&channel()), v.extreme_bg_color, Stroke::NONE));
+    polygon(&painter, &screen(&body()), shell, Stroke::new(1.5_f32, outline.color));
+    polygon(&painter, &screen(&channel()), v.extreme_bg_color, Stroke::NONE);
 
     // The main buttons are exact shapes, so test the pointer against them.
     let left = left_button();
     for (pos, poly) in [(ButtonPos::Left, left.clone()), (ButtonPos::Right, mirror(&left))] {
         let pts = screen(&poly);
         let Some(info) = buttons.get(&pos) else {
-            painter.add(Shape::convex_polygon(pts, shell, outline));
+            polygon(&painter, &pts, shell, outline);
             continue;
         };
         let bounds = Rect::from_points(&pts);
         let resp = ui.interact(bounds, ui.id().with(("mouse-button", pos)), Sense::click());
         let over = hover.is_some_and(|p| inside(&pts, p)) && resp.hovered();
-        painter.add(Shape::convex_polygon(pts.clone(), fill(pos, over), stroke(pos)));
+        polygon(&painter, &pts, fill(pos, over), stroke(pos));
         let side = if pos == ButtonPos::Left { -1.0 } else { 1.0 };
         let text_color = if selected == Some(pos) { v.selection.stroke.color } else { v.text_color() };
         painter.text(to_screen(pos2(side * 0.28, -0.3)), Align2::CENTER_CENTER, shorten(&info.binding, 11), FontId::proportional(12.0), text_color);
