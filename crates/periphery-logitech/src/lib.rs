@@ -70,8 +70,11 @@ const EFFECTS: [(u16, &str); 4] =
     [(effect::OFF, "Off"), (effect::STATIC, "Static colour"), (effect::CYCLE, "Colour cycle"), (effect::BREATHE, "Breathing")];
 
 /// Effect, colour, cycle time and brightness rows for one lighting zone;
-/// ids are `{prefix}.effect` etc.
-fn led_settings(g: &mut Group, prefix: &str, zone: &LedZone, led: Led, help: &str) {
+/// ids are `{prefix}.effect` etc. `shared` puts them on the Lighting tab.
+fn led_settings(g: &mut Group, prefix: &str, zone: &LedZone, led: Led, help: &str, shared: bool) {
+    let mut push = |s: Setting| {
+        g.push(if shared { s.role(Role::Lighting) } else { s });
+    };
     let mut opts: Vec<(i64, String)> =
         EFFECTS.iter().filter(|(id, _)| zone.effects.contains(id)).map(|(id, l)| (*id as i64, l.to_string())).collect();
     let current = led.effect();
@@ -79,18 +82,18 @@ fn led_settings(g: &mut Group, prefix: &str, zone: &LedZone, led: Led, help: &st
         opts.push((current as i64, format!("Effect {current:#04x}")));
     }
     let name = zone.name();
-    g.push(Setting::new(format!("{prefix}.effect"), format!("{name} lighting"), Kind::Choice(opts), Value::Int(current as i64)).help(help));
+    push(Setting::new(format!("{prefix}.effect"), format!("{name} lighting"), Kind::Choice(opts), Value::Int(current as i64)).help(help));
     if let Some(c) = led.color() {
-        g.push(Setting::new(format!("{prefix}.color"), format!("{name} colour"), Kind::Color, Value::Color(c)));
+        push(Setting::new(format!("{prefix}.color"), format!("{name} colour"), Kind::Color, Value::Color(c)));
     }
     if let Some((period, brightness)) = led.animation() {
-        g.push(Setting::new(
+        push(Setting::new(
             format!("{prefix}.period"),
             format!("{name} cycle time"),
             Kind::range_unit(1000, 20_000, 500, 0.001, " s"),
             Value::Int((period as i64).clamp(1000, 20_000)),
         ));
-        g.push(Setting::new(
+        push(Setting::new(
             format!("{prefix}.brightness"),
             format!("{name} brightness"),
             Kind::range_unit(1, 100, 1, 1.0, "%"),
@@ -269,7 +272,7 @@ impl LogitechMouse {
         if !self.zones.is_empty() {
             let mut g = Group::new("Lighting");
             for (slot, zone) in self.zones.iter().take(LED_SLOTS).enumerate() {
-                led_settings(&mut g, &format!("p.led.{slot}"), zone, p.led(slot), "Stored in the onboard profile");
+                led_settings(&mut g, &format!("p.led.{slot}"), zone, p.led(slot), "Stored in the onboard profile", onboard);
             }
             out.groups.push(g);
         }
@@ -364,7 +367,7 @@ impl Device for LogitechMouse {
                 let from_profile = self.profile.as_ref().filter(|_| i < LED_SLOTS).map(|p| p.led(i));
                 let led = read.or(self.live_leds[i]).or(from_profile).unwrap_or(Led::Static([0xFF; 3]));
                 self.live_leds[i] = Some(led);
-                led_settings(&mut g, &format!("live.led.{i}"), &zone, led, "Applies immediately but isn't stored on the mouse");
+                led_settings(&mut g, &format!("live.led.{i}"), &zone, led, "Applies immediately but isn't stored on the mouse", true);
             }
             if g.settings.is_empty() {
                 g.push(

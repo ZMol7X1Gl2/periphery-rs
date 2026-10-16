@@ -437,6 +437,13 @@ fn dpi(ui: &mut Ui, groups: &mut [Group], e: &mut Edits) {
     let single = stages.len() == 1 && active.is_none();
     let mut picked = None;
 
+    // Some mice only report the active stage (it changes with the DPI button).
+    if let Some(s) = with_role(groups, Role::ActiveStage).filter(|s| matches!(s.kind, Kind::Info)) {
+        egui::Grid::new("dpi-active").num_columns(2).spacing([14.0, 10.0]).show(ui, |ui| {
+            setting_row(ui, s, &mut e.changes, &mut e.confirm);
+        });
+        ui.add_space(4.0);
+    }
     egui::Grid::new("dpi").num_columns(4).spacing([10.0, 10.0]).show(ui, |ui| {
         for n in stages {
             if let Some((id, current, valid, help)) = &active {

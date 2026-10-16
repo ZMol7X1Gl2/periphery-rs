@@ -7,7 +7,9 @@
   <meta name="description" content="Configure mice and keyboards from different brands in your browser.">
   <link data-trunk rel="rust" data-bin="periphery-web" data-wasm-opt="z">
   <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1b1b; color: #ddd; }
+    /* Match the app's panel colour (crates/app/src/theme.rs) so loading doesn't flash. */
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #16181d; color: #c9ccd6; }
+    @media (prefers-color-scheme: light) { html, body { background: #f4f5f8; color: #3c3f47; } }
     canvas { display: block; width: 100%; height: 100%; }
     #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
       font: 16px system-ui, sans-serif; padding: 16px; text-align: center; }

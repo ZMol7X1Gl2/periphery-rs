@@ -319,12 +319,12 @@ impl eframe::App for App {
             ui.add_space(10.0);
             let full = egui::vec2(ui.available_width(), 32.0);
             if platform::ASKS_FOR_DEVICES
-                && ui.add(egui::Button::new("＋  Connect a device…").min_size(full)).on_hover_text("Choose devices to give this page access to").clicked()
+                && ui.add(egui::Button::new("+  Connect a device…").min_size(full)).on_hover_text("Choose devices to give this page access to").clicked()
             {
                 self.send(Req::Request(false));
             }
             if platform::ASKS_FOR_DEVICES
-                && ui.small_button("Connect another device…").on_hover_text("Pick a device Periphery doesn't support yet, to request support for it").clicked()
+                && ui.add(egui::Button::new(RichText::new("Connect another device…").small().weak()).frame(false)).on_hover_text("Pick a device Periphery doesn't support yet, to request support for it").clicked()
             {
                 self.send(Req::Request(true));
             }
