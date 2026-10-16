@@ -18,6 +18,17 @@ release workflow turns Unreleased into the new version.
   `periphery-cli list` prints the same links.
 - Web app: **Connect another device…** lets you pick any device, so you can
   request support for it.
+- Logitech: lighting for mice with LEDs such as the PRO 2 LIGHTSPEED. Choose
+  off, static colour, colour cycle or breathing, plus the colour, cycle time
+  and brightness. The setting is stored in the onboard profile, or applies
+  live in software mode.
+
+### Changed
+
+- Ajazz mice: the active DPI stage is shown but can no longer be changed
+  from Periphery. The AJ179 PRO ignores it, so trying to change it failed
+  with "the mouse did not keep the DPI change". Use the DPI button on the
+  mouse instead. `periphery-cli diag` now also prints the raw DPI reply.
 
 ## [0.3.0-rc.2] - 2026-10-15
 

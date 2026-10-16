@@ -23,6 +23,7 @@ know it.
 | QMK/VIA | Any VIA-enabled keyboard | USB | 🟡 | 🟡 | Needs a layout definition file for the keymap |
 | Logitech | PRO X Superlight | Lightspeed receiver (`046D:C547`) | ✅ | 🟡 | Firmware MPM25.01, HID++ 4.2 |
 | Logitech | PRO X Superlight 2 | Lightspeed receiver | ✅ | 🟡 | Software (live) mode confirmed working since 0.1.1-rc.2 |
+| Logitech | PRO 2 LIGHTSPEED | Lightspeed receiver | 🟡 | 🟡 | Lighting untested |
 | Logitech | Other HID++ 2.0 mice | Receiver or USB | 🟡 | 🟡 | |
 | Ajazz | AJ179 PRO / APEX / MC PRO, AJ159 PRO / APEX | Wired (`3151:4026` …) or receiver | 🟡 | 🟡 | Protocol recovered from the qmk.top web driver |
 | ROCCAT | Kone Aimo Remastered / 16K (`1E7D:2E2C`) | USB | ✅ | ❌ | Desktop on Windows: DPI and button remapping confirmed (0.3.0-rc.1). Web: Chrome, Edge and Arc on Windows hide the settings interface (tested with a 16K) |
@@ -76,6 +77,8 @@ know it.
 | Live DPI and polling rate, extended (0x2202 / 0x8061) | ✅ (Superlight 2) |
 | Onboard profile editing: DPI stages, polling rate, buttons, name | ✅ |
 | Reset profile to factory | ✅ |
+| Lighting in onboard profiles: effect, colour, cycle time, brightness | 🟡 |
+| Live lighting (0x8070 / 0x8071) | 🟡 |
 | Backup / restore | ✅ |
 | Notice when a paired mouse is asleep | ❌ (the mouse is left out of the list) |
 
@@ -86,15 +89,18 @@ know it.
 | Model detection, firmware, battery (receiver) | 🟡 |
 | Onboard profiles | 🟡 |
 | Polling rate | 🟡 |
-| DPI stages and colours, active stage | 🟡 |
+| DPI values per stage (AJ179 PRO, web app) | ✅ |
+| Stage count, stage colours | 🟡 |
+| Active stage | Read only: the AJ179 PRO ignores it on write |
 | Lift-off distance, angle snapping, ripple control | 🟡 |
 | Buttons | 🟡 |
 | Factory reset | 🟡 |
 | Backup / restore | 🟡 |
 
-Open questions for the first test: whether the `D3`/`D4` replies echo the
-command byte, the button matrix (`D0`) reply offset, and the receiver's
-product id. `periphery-cli diag` prints the raw replies.
+First hardware report (a friend's AJ179 PRO in the web app): editing a
+stage's DPI works, so the `D4` reply echoes the command byte. Writing the
+active stage (byte 2 of `54`) changes nothing. Still open: the button
+matrix (`D0`) reply offset and the receiver's product id. `periphery-cli diag` prints the raw replies.
 
 ### ROCCAT Kone Aimo
 

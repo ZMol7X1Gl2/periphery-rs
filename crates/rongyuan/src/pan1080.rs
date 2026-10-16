@@ -157,6 +157,9 @@ pub struct DpiStage {
 /// DPI stages (`D4 p` reply / `54 p` payload): byte 2 = active stage, 3 =
 /// stage count, then per stage `i`: X at `8 + 2i`, Y at `24 + 2i` (u16 LE),
 /// colour at `40 + 3i` (RGB). At most 8 stages.
+///
+/// The AJ179 PRO ignores byte 2 of a write: the active stage only changes
+/// with the DPI button, although the web driver writes it too.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DpiTable {
     pub current: u8,
@@ -357,8 +360,12 @@ impl Mouse {
         Ok(())
     }
 
+    pub async fn dpi_raw(&self, profile: u8) -> Result<Report> {
+        self.link.query_echo(&[cmd::GET_DPI, profile]).await
+    }
+
     pub async fn dpi(&self, profile: u8) -> Result<DpiTable> {
-        Ok(DpiTable::parse(&self.link.query_echo(&[cmd::GET_DPI, profile]).await?))
+        Ok(DpiTable::parse(&self.dpi_raw(profile).await?))
     }
 
     pub async fn set_dpi(&self, profile: u8, t: &DpiTable) -> Result<()> {
@@ -367,9 +374,10 @@ impl Mouse {
         }
         self.link.send(&t.to_write(profile)).await?;
         sleep(WRITE_SETTLE).await;
+        // Only the stages are checked: the mouse keeps its own active stage.
         let back = self.dpi(profile).await?;
-        if &back != t {
-            bail!("the mouse did not keep the DPI change");
+        if back.stages != t.stages {
+            bail!("the mouse did not keep the DPI change (reads back {:?})", back.stages);
         }
         Ok(())
     }

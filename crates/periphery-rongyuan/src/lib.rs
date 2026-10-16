@@ -159,12 +159,12 @@ impl Device for RongyuanDevice {
             Kind::range(1, model.stages as i64),
             Value::Int(dpi.stages.len() as i64),
         ));
-        perf.push(Setting::new(
-            "stage",
-            "Active stage",
-            Kind::choice((0..dpi.stages.len() as i64).map(|i| (i, format!("Stage {}", i + 1)))),
-            Value::Int(dpi.current as i64),
-        ));
+        // Read-only: the AJ179 PRO ignores the active-stage byte of a `54`
+        // write (the stage only changes with the DPI button).
+        perf.push(
+            Setting::new("stage", "Active stage", Kind::Info, Value::Text(format!("Stage {}", dpi.current + 1)))
+                .help("Change it with the DPI button on the mouse"),
+        );
         out.groups.push(perf);
 
         let mut g = Group::new("DPI");
@@ -259,7 +259,7 @@ impl Device for RongyuanDevice {
                 let on = value.bool()?;
                 self.edit_options(|o| Ok(o.set_ripple(on)), Options::ripple).await
             }
-            "stages" | "stage" | "dpi" | "color" => {
+            "stages" | "dpi" | "color" => {
                 let profile = self.mouse.options().await?.profile();
                 let mut t = self.mouse.dpi(profile).await?;
                 match name {
@@ -274,13 +274,6 @@ impl Device for RongyuanDevice {
                         if t.current as usize >= n {
                             t.current = 0;
                         }
-                    }
-                    "stage" => {
-                        let s = value.int()?;
-                        if !(0..t.stages.len() as i64).contains(&s) {
-                            bail!("no stage {}", s + 1);
-                        }
-                        t.current = s as u8;
                     }
                     _ => {
                         let i = idx()?;
@@ -345,6 +338,7 @@ pub async fn diag(api: &Api) -> Vec<String> {
         let profile = options.as_ref().map(|o| o.profile()).unwrap_or(0);
         show("options", options.map(|o| hex(&o.raw)));
         show("dpi", mouse.dpi(profile).await.map(|t| format!("{t:?}")));
+        show("dpi raw", mouse.dpi_raw(profile).await.map(|r| hex(&r)));
         show("buttons", mouse.buttons_raw(profile).await.map(|r| hex(&r)));
     }
     out
