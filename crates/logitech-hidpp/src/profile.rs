@@ -9,6 +9,7 @@
 //! | 32.. | button bindings, 4 bytes each |
 //! | 96.. | G-shift bindings |
 //! | 160..208 | name, UTF-16LE, 24 characters |
+//! | 208..230 | 2 lighting zones, 11 bytes each (see [`Led`]) |
 //! | last 2 | CRC-16/CCITT (init 0xFFFF) of the rest, big-endian |
 //!
 //! Every other byte is kept as read, so encoding only touches edited fields.
@@ -23,6 +24,9 @@ const OFF_DPI: usize = 3;
 const OFF_BUTTONS: usize = 32;
 const OFF_NAME: usize = 160;
 pub const NAME_LEN: usize = 24;
+const OFF_LEDS: usize = 208;
+pub const LED_SLOTS: usize = 2;
+pub const LED_LEN: usize = 11;
 
 pub fn crc16(data: &[u8]) -> u16 {
     let mut crc: u16 = 0xFFFF;
@@ -88,6 +92,120 @@ impl Binding {
             Binding::Special(c) => [0x90, c, 0, 0],
             Binding::Disabled => [0xFF; 4],
             Binding::Raw(r) => r,
+        }
+    }
+}
+
+/// Lighting effect ids, shared by profiles and the live LED features.
+pub mod effect {
+    pub const OFF: u16 = 0x00;
+    pub const STATIC: u16 = 0x01;
+    pub const CYCLE: u16 = 0x03;
+    pub const BREATHE: u16 = 0x0A;
+}
+
+/// One zone's lighting: an effect id and 10 parameter bytes, the layout used
+/// by onboard profiles and by the live effects of 0x8070 / 0x8071 (where the
+/// first byte is the effect's index in the zone's list instead of its id).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Led {
+    Off,
+    Static([u8; 3]),
+    /// Colour cycle; `period` in ms, `brightness` 1-100.
+    Cycle { period: u16, brightness: u8 },
+    Breathe { color: [u8; 3], period: u16, brightness: u8 },
+    Raw([u8; LED_LEN]),
+}
+
+impl Led {
+    pub fn decode(b: [u8; LED_LEN]) -> Led {
+        // A brightness of 0 means full brightness.
+        let bright = |v: u8| if v == 0 { 100 } else { v };
+        match b[0] as u16 {
+            effect::OFF => Led::Off,
+            effect::STATIC => Led::Static([b[1], b[2], b[3]]),
+            effect::CYCLE => Led::Cycle { period: u16::from_be_bytes([b[6], b[7]]), brightness: bright(b[8]) },
+            effect::BREATHE => {
+                Led::Breathe { color: [b[1], b[2], b[3]], period: u16::from_be_bytes([b[4], b[5]]), brightness: bright(b[7]) }
+            }
+            _ => Led::Raw(b),
+        }
+    }
+
+    pub fn encode(self) -> [u8; LED_LEN] {
+        let mut b = [0u8; LED_LEN];
+        match self {
+            Led::Off => {}
+            Led::Static(c) => {
+                b[0] = effect::STATIC as u8;
+                b[1..4].copy_from_slice(&c);
+            }
+            Led::Cycle { period, brightness } => {
+                b[0] = effect::CYCLE as u8;
+                b[6..8].copy_from_slice(&period.to_be_bytes());
+                b[8] = brightness;
+            }
+            Led::Breathe { color, period, brightness } => {
+                b[0] = effect::BREATHE as u8;
+                b[1..4].copy_from_slice(&color);
+                b[4..6].copy_from_slice(&period.to_be_bytes());
+                b[7] = brightness;
+            }
+            Led::Raw(r) => b = r,
+        }
+        b
+    }
+
+    pub fn effect(self) -> u16 {
+        self.encode()[0] as u16
+    }
+
+    pub fn color(self) -> Option<[u8; 3]> {
+        match self {
+            Led::Static(c) | Led::Breathe { color: c, .. } => Some(c),
+            _ => None,
+        }
+    }
+
+    /// (period in ms, brightness) of animated effects.
+    pub fn animation(self) -> Option<(u16, u8)> {
+        match self {
+            Led::Cycle { period, brightness } | Led::Breathe { period, brightness, .. } => Some((period, brightness)),
+            _ => None,
+        }
+    }
+
+    /// Switches to effect `id`, keeping the colour and timing where they apply.
+    pub fn with_effect(self, id: u16) -> Led {
+        let color = self.color().unwrap_or([0xFF; 3]);
+        match id {
+            effect::OFF => Led::Off,
+            effect::STATIC => Led::Static(color),
+            effect::CYCLE => {
+                let (period, brightness) = self.animation().unwrap_or((10_000, 100));
+                Led::Cycle { period, brightness }
+            }
+            effect::BREATHE => {
+                let (period, brightness) = self.animation().unwrap_or((4_000, 100));
+                Led::Breathe { color, period, brightness }
+            }
+            _ => self,
+        }
+    }
+
+    pub fn with_color(self, c: [u8; 3]) -> Led {
+        match self {
+            Led::Static(_) => Led::Static(c),
+            Led::Breathe { period, brightness, .. } => Led::Breathe { color: c, period, brightness },
+            other => other,
+        }
+    }
+
+    pub fn with_animation(self, period: u16, brightness: u8) -> Led {
+        match self {
+            Led::Cycle { .. } => Led::Cycle { period, brightness },
+            Led::Breathe { color, .. } => Led::Breathe { color, period, brightness },
+            other => other,
         }
     }
 }
@@ -187,6 +305,17 @@ impl Profile {
         String::from_utf16_lossy(&units)
     }
 
+    /// Lighting of zone `slot` (`< LED_SLOTS`).
+    pub fn led(&self, slot: usize) -> Led {
+        let o = OFF_LEDS + slot * LED_LEN;
+        Led::decode(self.raw[o..o + LED_LEN].try_into().unwrap())
+    }
+
+    pub fn set_led(&mut self, slot: usize, led: Led) {
+        let o = OFF_LEDS + slot * LED_LEN;
+        self.raw[o..o + LED_LEN].copy_from_slice(&led.encode());
+    }
+
     pub fn set_name(&mut self, name: &str) {
         let mut units: Vec<u16> = name.encode_utf16().take(NAME_LEN).collect();
         units.resize(NAME_LEN, 0);
@@ -229,6 +358,9 @@ mod tests {
         assert_eq!(p.button(0), Binding::Mouse(1));
         assert_eq!(p.button(4), Binding::Mouse(0x10));
         assert_eq!(p.name(), "PROFILE_NAME_DEFAULT");
+        // No lights on a Superlight: both zones off, with a leftover cycle period.
+        assert_eq!(p.led(0), Led::Off);
+        assert_eq!(p.led(1), Led::Off);
         // Unchanged profile re-encodes byte for byte (CRC 0x4a3a).
         assert_eq!(p.encode(), superlight_profile());
     }
@@ -245,5 +377,20 @@ mod tests {
         assert_eq!(q.button(3), Binding::Special(special::DPI_CYCLE));
         assert_eq!(q.name(), "Gaming");
         assert!(Profile::parse(superlight_profile().into_iter().map(|b| b ^ 1).collect(), 5).is_err());
+    }
+
+    #[test]
+    fn led_effects_round_trip() {
+        let mut p = Profile::parse(superlight_profile(), 5).unwrap();
+        let breathe = Led::Off.with_effect(effect::BREATHE).with_color([0x12, 0x34, 0x56]).with_animation(3000, 80);
+        p.set_led(0, breathe);
+        p.set_led(1, Led::Cycle { period: 8000, brightness: 100 });
+        let q = Profile::parse(p.encode(), 5).unwrap();
+        assert_eq!(q.led(0), Led::Breathe { color: [0x12, 0x34, 0x56], period: 3000, brightness: 80 });
+        assert_eq!(q.led(0).encode(), [0x0A, 0x12, 0x34, 0x56, 0x0B, 0xB8, 0, 80, 0, 0, 0]);
+        assert_eq!(q.led(1).encode(), [0x03, 0, 0, 0, 0, 0, 0x1F, 0x40, 100, 0, 0]);
+        // Name and buttons are untouched.
+        assert_eq!(q.name(), "PROFILE_NAME_DEFAULT");
+        assert_eq!(Led::decode([0x0B; LED_LEN]), Led::Raw([0x0B; LED_LEN]));
     }
 }

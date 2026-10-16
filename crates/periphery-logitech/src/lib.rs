@@ -2,8 +2,8 @@
 //! `logitech-hidpp` crate).
 
 use anyhow::{Result, bail};
-use logitech_hidpp::profile::{Binding, DPI_STAGES, NAME_LEN, Profile, special};
-use logitech_hidpp::{Charging, Device as Hidpp, DpiInfo, Mode, OnboardInfo, ROM_BASE};
+use logitech_hidpp::profile::{Binding, DPI_STAGES, LED_SLOTS, Led, NAME_LEN, Profile, effect, special};
+use logitech_hidpp::{Charging, Device as Hidpp, DpiInfo, LedZone, Mode, OnboardInfo, ROM_BASE};
 use periphery_core::hid::{Api, Filter};
 use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Setting, Snapshot, Value, async_trait};
 
@@ -38,6 +38,11 @@ pub struct LogitechMouse {
     /// Profile sector shown in the editor, and its last-read contents.
     edit_sector: Option<u16>,
     profile: Option<Profile>,
+    /// Lighting zones (none on mice without lights), the last live effect
+    /// set on each, and whether software has taken lighting control.
+    zones: Vec<LedZone>,
+    live_leds: Vec<Option<Led>>,
+    led_control: bool,
 }
 
 /// Button choice values beyond the mouse-button bitmasks.
@@ -60,6 +65,56 @@ const SPECIALS: [(u8, &str); 10] = [
     (special::PROFILE_DOWN, "Previous profile"),
 ];
 const BUTTON_NAMES: [&str; 5] = ["Left", "Right", "Middle", "Back", "Forward"];
+const EFFECTS: [(u16, &str); 4] =
+    [(effect::OFF, "Off"), (effect::STATIC, "Static colour"), (effect::CYCLE, "Colour cycle"), (effect::BREATHE, "Breathing")];
+
+/// Effect, colour, cycle time and brightness rows for one lighting zone;
+/// ids are `{prefix}.effect` etc.
+fn led_settings(g: &mut Group, prefix: &str, zone: &LedZone, led: Led, help: &str) {
+    let mut opts: Vec<(i64, String)> =
+        EFFECTS.iter().filter(|(id, _)| zone.effects.contains(id)).map(|(id, l)| (*id as i64, l.to_string())).collect();
+    let current = led.effect();
+    if !opts.iter().any(|(v, _)| *v == current as i64) {
+        opts.push((current as i64, format!("Effect {current:#04x}")));
+    }
+    let name = zone.name();
+    g.push(Setting::new(format!("{prefix}.effect"), format!("{name} lighting"), Kind::Choice(opts), Value::Int(current as i64)).help(help));
+    if let Some(c) = led.color() {
+        g.push(Setting::new(format!("{prefix}.color"), format!("{name} colour"), Kind::Color, Value::Color(c)));
+    }
+    if let Some((period, brightness)) = led.animation() {
+        g.push(Setting::new(
+            format!("{prefix}.period"),
+            format!("{name} cycle time"),
+            Kind::range_unit(1000, 20_000, 500, 0.001, " s"),
+            Value::Int((period as i64).clamp(1000, 20_000)),
+        ));
+        g.push(Setting::new(
+            format!("{prefix}.brightness"),
+            format!("{name} brightness"),
+            Kind::range_unit(1, 100, 1, 1.0, "%"),
+            Value::Int(brightness.clamp(1, 100) as i64),
+        ));
+    }
+}
+
+/// Applies one edited lighting row (`effect`, `color`, `period` or
+/// `brightness`) to `led`.
+fn led_edit(led: Led, field: &str, value: &Value) -> Result<Led> {
+    Ok(match (field, value) {
+        ("effect", v) => led.with_effect(v.int()? as u16),
+        ("color", Value::Color(c)) => led.with_color(*c),
+        ("period", v) => {
+            let Some((_, b)) = led.animation() else { bail!("this effect has no cycle time") };
+            led.with_animation(v.int()?.clamp(1000, 20_000) as u16, b)
+        }
+        ("brightness", v) => {
+            let Some((p, _)) = led.animation() else { bail!("this effect has no brightness") };
+            led.with_animation(p, v.int()?.clamp(1, 100) as u8)
+        }
+        _ => bail!("unknown lighting setting {field}"),
+    })
+}
 
 fn hz(ms: u8) -> String {
     format!("{} Hz", 1000 / ms.max(1) as u32)
@@ -80,6 +135,8 @@ impl LogitechMouse {
     async fn new(mut dev: Hidpp) -> Result<Self> {
         let model = dev.name().await.unwrap_or_else(|_| format!("device {:04x}", dev.product_id));
         let onboard = dev.onboard_info().await?;
+        // Lighting is optional; a mouse that fails to describe it just has none.
+        let zones = dev.led_zones().await.unwrap_or_default();
         let info = DeviceInfo {
             brand: "Logitech".into(),
             model,
@@ -87,7 +144,8 @@ impl LogitechMouse {
             vid: logitech_hidpp::VENDOR_ID,
             pid: dev.product_id,
         };
-        Ok(LogitechMouse { dev, info, onboard, edit_sector: None, profile: None })
+        let live_leds = vec![None; zones.len()];
+        Ok(LogitechMouse { dev, info, onboard, edit_sector: None, profile: None, zones, live_leds, led_control: false })
     }
 
     fn dpi_kind(info: &DpiInfo) -> Kind {
@@ -201,6 +259,14 @@ impl LogitechMouse {
         );
         out.groups.push(g);
 
+        if !self.zones.is_empty() {
+            let mut g = Group::new("Lighting");
+            for (slot, zone) in self.zones.iter().take(LED_SLOTS).enumerate() {
+                led_settings(&mut g, &format!("p.led.{slot}"), zone, p.led(slot), "Stored in the onboard profile");
+            }
+            out.groups.push(g);
+        }
+
         let mut b = Group::new("Buttons");
         for i in 0..p.button_count().min(BUTTON_NAMES.len()) {
             let (value, other) = binding_choice(p.button(i));
@@ -267,6 +333,10 @@ impl Device for LogitechMouse {
             );
             out.groups.push(g);
         }
+        // The profile groups are read first so live lighting can start from
+        // the profile's colours, but the live group is shown above them.
+        let live_at = out.groups.len();
+        self.profile_groups(&mut out, dpi.as_ref(), &intervals, mode).await?;
         if mode == Mode::Host {
             let mut g = Group::new("Live settings");
             if let Some(d) = &dpi {
@@ -278,24 +348,66 @@ impl Device for LogitechMouse {
             if !rates.is_empty() {
                 g.push(Setting::new("live.rate", "Polling rate", Self::hz_kind(&rates), Value::Int(self.dev.report_rate().await? as i64)));
             }
+            for i in 0..self.zones.len() {
+                let zone = self.zones[i].clone();
+                let read = self.dev.led(&zone).await.unwrap_or(None);
+                let from_profile = self.profile.as_ref().filter(|_| i < LED_SLOTS).map(|p| p.led(i));
+                let led = read.or(self.live_leds[i]).or(from_profile).unwrap_or(Led::Static([0xFF; 3]));
+                self.live_leds[i] = Some(led);
+                led_settings(&mut g, &format!("live.led.{i}"), &zone, led, "Applies immediately but isn't stored on the mouse");
+            }
             if g.settings.is_empty() {
                 g.push(
                     Setting::new("live.none", "Live controls", Kind::Info, Value::Text("not reported by this mouse".into()))
                         .help("The mouse exposes neither DPI nor polling-rate features in software mode."),
                 );
             }
-            out.groups.push(g);
+            out.groups.insert(live_at, g);
         }
-        self.profile_groups(&mut out, dpi.as_ref(), &intervals, mode).await?;
         Ok(out)
     }
 
     async fn set(&mut self, id: &str, value: &Value) -> Result<()> {
         let (head, tail) = id.rsplit_once('.').map_or((id, ""), |(h, t)| (h, t));
+        if let Some(slot) = head.strip_prefix("p.led.") {
+            let slot: usize = slot.parse()?;
+            if slot >= LED_SLOTS.min(self.zones.len()) {
+                bail!("no lighting zone {slot}");
+            }
+            return self
+                .edit_profile(|p| {
+                    p.set_led(slot, led_edit(p.led(slot), tail, value)?);
+                    Ok(())
+                })
+                .await;
+        }
+        if let Some(i) = head.strip_prefix("live.led.") {
+            let i: usize = i.parse()?;
+            let Some(zone) = self.zones.get(i).cloned() else { bail!("no lighting zone {i}") };
+            let led = led_edit(self.live_leds[i].unwrap_or(Led::Static([0xFF; 3])), tail, value)?;
+            if !self.led_control {
+                // Not every mouse needs (or has) the switch; the effect write
+                // below reports any real problem.
+                for z in &self.zones {
+                    let _ = self.dev.set_led_control(z, true).await;
+                }
+                self.led_control = true;
+            }
+            self.dev.set_led(&zone, led).await?;
+            self.live_leds[i] = Some(led);
+            return Ok(());
+        }
         match (head, tail) {
             ("mode", _) => {
                 let mode = if value.int()? == Mode::Onboard as i64 { Mode::Onboard } else { Mode::Host };
                 self.dev.set_mode(mode).await?;
+                if mode == Mode::Onboard && self.led_control {
+                    // Hand lighting back to the onboard profile.
+                    for z in &self.zones {
+                        let _ = self.dev.set_led_control(z, false).await;
+                    }
+                    self.led_control = false;
+                }
                 if mode == Mode::Onboard {
                     if let Some(s) = self.edit_sector {
                         self.dev.set_current_profile(s).await?;

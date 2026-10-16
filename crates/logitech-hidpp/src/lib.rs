@@ -24,6 +24,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use profile::{LED_LEN, Led};
 use hid_transport::{Api, Device as HidDevice, Filter, Instant};
 
 pub const VENDOR_ID: u16 = 0x046D;
@@ -45,6 +46,8 @@ pub mod feature {
     pub const EXT_ADJUSTABLE_DPI: u16 = 0x2202;
     pub const REPORT_RATE: u16 = 0x8060;
     pub const EXT_REPORT_RATE: u16 = 0x8061;
+    pub const COLOR_LED_EFFECTS: u16 = 0x8070;
+    pub const RGB_EFFECTS: u16 = 0x8071;
     pub const ONBOARD_PROFILES: u16 = 0x8100;
 }
 
@@ -171,6 +174,32 @@ pub enum Mode {
     Onboard = 1,
     /// Settings are controlled live by software (G HUB uses this).
     Host = 2,
+}
+
+/// A lighting zone of 0x8070 (zone) or 0x8071 (cluster).
+#[derive(Clone, Debug)]
+pub struct LedZone {
+    pub feature: u16,
+    pub index: u8,
+    /// 1 primary, 2 logo, 3 left side, 4 right side, 5 combined, …
+    pub location: u16,
+    /// Effect ids, in the zone's own order (live writes use the position).
+    pub effects: Vec<u16>,
+    /// The current effect can be read back (0x8070 only).
+    pub readable: bool,
+}
+
+impl LedZone {
+    pub fn name(&self) -> String {
+        match self.location {
+            1 => "Primary".into(),
+            2 => "Logo".into(),
+            3 => "Left side".into(),
+            4 => "Right side".into(),
+            5 => "Combined".into(),
+            _ => format!("Zone {}", self.index + 1),
+        }
+    }
 }
 
 /// Directory sector listing profile sectors and whether they are enabled.
@@ -438,6 +467,89 @@ impl Device {
         }
         let Some(index) = (0..7u8).find(|i| 125u32 << i == hz) else { bail!("unsupported polling rate {hz} Hz") };
         self.call(feature::EXT_REPORT_RATE, 3, &[index]).await?;
+        Ok(())
+    }
+
+    // ------------------------------- lighting (0x8070, RGB effects 0x8071)
+
+    /// Lighting zones with the effects each supports; empty without either
+    /// feature.
+    pub async fn led_zones(&mut self) -> Result<Vec<LedZone>> {
+        let mut out = Vec::new();
+        if self.has(feature::COLOR_LED_EFFECTS).await? {
+            // getInfo: [zone count, _, _, capabilities u16]; bit 0 = readable.
+            let f = feature::COLOR_LED_EFFECTS;
+            let info = self.call(f, 0, &[]).await?;
+            let readable = info[4] & 1 != 0;
+            for zone in 0..info[0] {
+                // getZoneInfo: [zone, location u16, effect count].
+                let z = self.call(f, 1, &[zone]).await?;
+                let mut effects = Vec::new();
+                for i in 0..z[3] {
+                    // getZoneEffectInfo: [zone, index, effect id u16, caps u16, period u16].
+                    let e = self.call(f, 2, &[zone, i, 0xFF, 0]).await?;
+                    effects.push(u16::from_be_bytes([e[2], e[3]]));
+                }
+                out.push(LedZone { feature: f, index: zone, location: u16::from_be_bytes([z[1], z[2]]), effects, readable });
+            }
+        } else if self.has(feature::RGB_EFFECTS).await? {
+            // getInfo(0xFF, 0xFF): device info, cluster count in byte 2;
+            // (cluster, 0xFF): location u16 in bytes 2-3, effect count in 4;
+            // (cluster, effect): [cluster, index, effect id u16, …].
+            let f = feature::RGB_EFFECTS;
+            let count = self.call(f, 0, &[0xFF, 0xFF, 0]).await?[2];
+            for cluster in 0..count {
+                let c = self.call(f, 0, &[cluster, 0xFF, 0]).await?;
+                let mut effects = Vec::new();
+                for i in 0..c[4] {
+                    let e = self.call(f, 0, &[cluster, i, 0xFF, 0]).await?;
+                    effects.push(u16::from_be_bytes([e[2], e[3]]));
+                }
+                let location = u16::from_be_bytes([c[2], c[3]]);
+                out.push(LedZone { feature: f, index: cluster, location, effects, readable: false });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Current live effect of a readable zone.
+    pub async fn led(&mut self, zone: &LedZone) -> Result<Option<Led>> {
+        if !zone.readable {
+            return Ok(None);
+        }
+        // getZoneEffect: [zone, effect index, params[10]].
+        let p = self.call(zone.feature, 14, &[zone.index]).await?;
+        let Some(&id) = zone.effects.get(p[1] as usize) else { return Ok(None) };
+        let mut b = [0u8; LED_LEN];
+        b[0] = id as u8;
+        b[1..].copy_from_slice(&p[2..12]);
+        Ok(Some(Led::decode(b)))
+    }
+
+    /// Gives lighting control to software (as G HUB does in software mode)
+    /// or back to the device.
+    pub async fn set_led_control(&mut self, zone: &LedZone, software: bool) -> Result<()> {
+        match zone.feature {
+            feature::COLOR_LED_EFFECTS => self.call(zone.feature, 8, &[software as u8]).await?,
+            _ => self.call(zone.feature, 5, &[1, software as u8]).await?,
+        };
+        Ok(())
+    }
+
+    /// Shows `led` on a zone right away (setZoneEffect / setRgbClusterEffect:
+    /// zone, effect index, 10 parameter bytes, persistence).
+    pub async fn set_led(&mut self, zone: &LedZone, led: Led) -> Result<()> {
+        let b = led.encode();
+        let Some(i) = zone.effects.iter().position(|e| *e == b[0] as u16) else {
+            bail!("{} lighting can't show effect {:#04x}", zone.name(), b[0])
+        };
+        let mut req = [0u8; 13];
+        req[0] = zone.index;
+        req[1] = i as u8;
+        req[2..12].copy_from_slice(&b[1..]);
+        req[12] = 1;
+        let func = if zone.feature == feature::COLOR_LED_EFFECTS { 3 } else { 1 };
+        self.call(zone.feature, func, &req).await?;
         Ok(())
     }
 
