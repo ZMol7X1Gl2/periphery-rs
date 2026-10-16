@@ -36,6 +36,12 @@ release workflow turns Unreleased into the new version.
   and add or remove stages with − / +. Settings only one brand has (Scyrox
   competition mode, the ROCCAT Easy-Shift layer, Logitech's onboard
   profile while in software mode…) are on that brand's own tab.
+- Buttons are assigned on a drawing of a mouse: click a button on it (or in
+  the list below it), then pick its action from the buttons next to it;
+  long action lists can be filtered. Extra options such as macro text or
+  shortcut keys appear under the chosen action. Only the buttons the mouse
+  has are drawn: side, thumb, wheel tilt and scroll, top and underside
+  buttons.
 - On/off settings are switches instead of checkboxes.
 
 ## [0.3.0-rc.2] - 2026-10-15

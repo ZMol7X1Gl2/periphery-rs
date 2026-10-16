@@ -135,10 +135,10 @@ pub enum Role {
     Dpi(u8),
     /// Indicator colour of DPI stage n.
     StageColor(u8),
-    /// Binding of button n.
-    Button(u8),
-    /// Extra option for button n's binding (macro text, fire rate…).
-    ButtonOption(u8),
+    /// Binding of the button at this spot.
+    Button(ButtonPos),
+    /// Extra option for that button's binding (macro text, fire rate…).
+    ButtonOption(ButtonPos),
     LiftOff,
     Debounce,
     MotionSync,
@@ -148,6 +148,72 @@ pub enum Role {
     Sleep,
     Wireless,
     FactoryReset,
+}
+
+/// Where a button sits on a right-handed mouse, so the UI can draw one
+/// generic mouse for every brand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ButtonPos {
+    Left,
+    Right,
+    /// Wheel click.
+    Middle,
+    WheelUp,
+    WheelDown,
+    TiltLeft,
+    TiltRight,
+    /// Front side button.
+    Forward,
+    /// Rear side button.
+    Back,
+    /// Extra side button below the other two (ROCCAT Easy-Shift).
+    Thumb,
+    /// Single button behind the wheel (usually DPI).
+    Top,
+    /// Front one of two buttons behind the wheel.
+    TopFront,
+    /// Rear one of two buttons behind the wheel.
+    TopBack,
+    /// Button on the underside.
+    Bottom,
+}
+
+impl ButtonPos {
+    pub const ALL: [ButtonPos; 14] = [
+        ButtonPos::Left,
+        ButtonPos::Right,
+        ButtonPos::Middle,
+        ButtonPos::WheelUp,
+        ButtonPos::WheelDown,
+        ButtonPos::TiltLeft,
+        ButtonPos::TiltRight,
+        ButtonPos::Forward,
+        ButtonPos::Back,
+        ButtonPos::Thumb,
+        ButtonPos::Top,
+        ButtonPos::TopFront,
+        ButtonPos::TopBack,
+        ButtonPos::Bottom,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            ButtonPos::Left => "Left button",
+            ButtonPos::Right => "Right button",
+            ButtonPos::Middle => "Wheel click",
+            ButtonPos::WheelUp => "Wheel up",
+            ButtonPos::WheelDown => "Wheel down",
+            ButtonPos::TiltLeft => "Wheel tilt left",
+            ButtonPos::TiltRight => "Wheel tilt right",
+            ButtonPos::Forward => "Forward (side, front)",
+            ButtonPos::Back => "Back (side, rear)",
+            ButtonPos::Thumb => "Thumb button",
+            ButtonPos::Top => "Top button",
+            ButtonPos::TopFront => "Top button, front",
+            ButtonPos::TopBack => "Top button, rear",
+            ButtonPos::Bottom => "Bottom button",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

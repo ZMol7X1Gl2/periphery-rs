@@ -4,6 +4,7 @@
 use periphery_core::Driver;
 
 mod mouse;
+mod mouse_diagram;
 mod platform;
 pub mod request;
 pub mod ui;

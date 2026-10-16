@@ -3,11 +3,16 @@
 //! Drivers opt in by tagging settings with a [`Role`]; settings without one
 //! are device-specific and keep the driver's grouping on a tab of their own.
 
-use eframe::egui::{self, RichText, Ui};
-use periphery_core::{Group, Kind, Role, Setting, Snapshot, Value};
+use std::collections::BTreeMap;
 
+use eframe::egui::{self, RichText, Ui};
+use periphery_core::{ButtonPos, Group, Kind, Role, Setting, Snapshot, Value};
+
+use crate::mouse_diagram::{self, ButtonInfo};
 use crate::ui::{setting_row, setting_widget};
 
+/// Button actions with more choices than this get a filter box.
+const FILTER_FROM: usize = 16;
 /// Polling rates with at most this many choices show as a row of buttons.
 const MAX_RATE_BUTTONS: usize = 8;
 const MAX_WIDTH: f32 = 760.0;
@@ -65,6 +70,16 @@ impl MouseTab {
     }
 }
 
+/// What the mouse page remembers between frames.
+#[derive(Default)]
+pub struct MouseState {
+    pub tab: MouseTab,
+    /// The button being edited on the Buttons tab.
+    pub button: Option<ButtonPos>,
+    /// Filter for that button's action list.
+    pub filter: String,
+}
+
 /// What the user changed this frame.
 #[derive(Default)]
 pub struct Edits {
@@ -85,8 +100,9 @@ fn with_role(groups: &mut [Group], role: Role) -> Option<&mut Setting> {
     settings_mut(groups).find(|s| s.role == Some(role))
 }
 
-/// Draws the mouse page for `snap`; `tab` is kept by the caller.
-pub fn show(ui: &mut Ui, snap: &mut Snapshot, tab: &mut MouseTab, brand: &str, e: &mut Edits) {
+/// Draws the mouse page for `snap`; `state` is kept by the caller.
+pub fn show(ui: &mut Ui, snap: &mut Snapshot, state: &mut MouseState, brand: &str, e: &mut Edits) {
+    let tab = &mut state.tab;
     let groups = &mut snap.groups;
     profile_bar(ui, groups, e);
 
@@ -111,9 +127,7 @@ pub fn show(ui: &mut Ui, snap: &mut Snapshot, tab: &mut MouseTab, brand: &str, e
         ui.set_max_width(MAX_WIDTH);
         match shown {
             MouseTab::Performance => performance(ui, groups, e),
-            MouseTab::Buttons => card(ui, "Buttons", |ui| {
-                rows(ui, "buttons", groups, e, |r| matches!(r, Some(Role::Button(_) | Role::ButtonOption(_))));
-            }),
+            MouseTab::Buttons => buttons(ui, groups, &mut state.button, &mut state.filter, e),
             MouseTab::Sensor => card(ui, "Sensor", |ui| {
                 const ORDER: [Role; 5] = [Role::LiftOff, Role::MotionSync, Role::AngleSnap, Role::Ripple, Role::Debounce];
                 egui::Grid::new("sensor").num_columns(2).spacing([14.0, 10.0]).show(ui, |ui| {
@@ -170,6 +184,98 @@ fn rows(ui: &mut Ui, id: &str, groups: &mut [Group], e: &mut Edits, pick: impl F
         for s in settings_mut(groups).filter(|s| pick(s.role)) {
             setting_row(ui, s, &mut e.changes, &mut e.confirm);
         }
+    });
+}
+
+/// The mouse drawing on the left, the selected button's actions on the right.
+fn buttons(ui: &mut Ui, groups: &mut [Group], selected: &mut Option<ButtonPos>, filter: &mut String, e: &mut Edits) {
+    let infos: BTreeMap<ButtonPos, ButtonInfo> = settings(groups)
+        .filter_map(|s| match s.role {
+            Some(Role::Button(pos)) => Some((pos, ButtonInfo { name: s.label.trim().to_string(), binding: choice_label(s) })),
+            _ => None,
+        })
+        .collect();
+    if selected.is_some_and(|b| !infos.contains_key(&b)) {
+        *selected = None;
+    }
+    let mut pick = None;
+    ui.horizontal_top(|ui| {
+        ui.vertical(|ui| {
+            ui.set_width(250.0);
+            pick = mouse_diagram::show(ui, &infos, *selected);
+            ui.add_space(6.0);
+            egui::Grid::new("button-list").num_columns(2).spacing([10.0, 4.0]).show(ui, |ui| {
+                for (pos, info) in &infos {
+                    let on = *selected == Some(*pos);
+                    let name = if on { RichText::new(&info.name) } else { RichText::new(&info.name).weak() };
+                    if ui.selectable_label(on, name).clicked()
+                        | ui.selectable_label(on, &info.binding).clicked()
+                    {
+                        pick = Some(*pos);
+                    }
+                    ui.end_row();
+                }
+            });
+        });
+        ui.add_space(12.0);
+        ui.vertical(|ui| {
+            let Some(pos) = *selected else {
+                ui.add_space(40.0);
+                ui.label(RichText::new("Click a button on the mouse to choose what it does.").weak().size(14.0));
+                return;
+            };
+            if let Some(s) = with_role(groups, Role::Button(pos)) {
+                button_editor(ui, s, filter, e);
+            }
+            if settings(groups).any(|s| s.role == Some(Role::ButtonOption(pos))) {
+                ui.add_space(8.0);
+                card(ui, "Options", |ui| rows(ui, "button-options", groups, e, |r| r == Some(Role::ButtonOption(pos))));
+            }
+        });
+    });
+    if let Some(p) = pick {
+        if *selected != Some(p) {
+            filter.clear();
+        }
+        *selected = Some(p);
+    }
+}
+
+/// The label of a choice setting's current value.
+fn choice_label(s: &Setting) -> String {
+    match (&s.kind, &s.value) {
+        (Kind::Choice(opts), Value::Int(v)) => opts.iter().find(|(o, _)| o == v).map_or_else(|| v.to_string(), |(_, l)| l.clone()),
+        _ => String::new(),
+    }
+}
+
+/// Every action the button can take, as buttons.
+fn button_editor(ui: &mut Ui, s: &mut Setting, filter: &mut String, e: &mut Edits) {
+    ui.label(RichText::new(s.label.trim()).strong().size(17.0));
+    ui.label(RichText::new(format!("Currently: {}", choice_label(s))).weak());
+    if let Some(h) = &s.help {
+        ui.label(RichText::new(h).weak().small());
+    }
+    ui.add_space(6.0);
+    let (Kind::Choice(opts), Value::Int(v)) = (&s.kind, &mut s.value) else {
+        setting_widget(ui, s, &mut e.changes, &mut e.confirm);
+        return;
+    };
+    if opts.len() > FILTER_FROM {
+        ui.add(egui::TextEdit::singleline(filter).hint_text("Filter actions…").desired_width(220.0));
+        ui.add_space(4.0);
+    }
+    let needle = filter.to_lowercase();
+    egui::ScrollArea::vertical().id_salt("button-actions").max_height(320.0).show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            for (o, l) in opts.iter().filter(|(_, l)| l.to_lowercase().contains(&needle)) {
+                let button = egui::Button::new(l).selected(*v == *o).min_size(egui::vec2(96.0, 30.0));
+                if ui.add(button).clicked() && *v != *o {
+                    *v = *o;
+                    e.changes.push((s.id.clone(), Value::Int(*o)));
+                }
+            }
+        });
     });
 }
 

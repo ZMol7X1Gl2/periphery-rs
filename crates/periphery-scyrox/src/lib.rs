@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use periphery_core::hid::{self, Api, Filter};
 use periphery_core::{
-    Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Role, Setting, Snapshot, Value, async_trait,
+    Device, DeviceInfo, DeviceKind, ButtonPos, Driver, Group, Kind, Role, Setting, Snapshot, Value, async_trait,
 };
 
 use config::{ANGLE_TUNE_RANGE, Change, KEY_NAMES, MAX_DEBOUNCE, PROFILES, REPORT_RATES, SLEEP_OPTIONS, STAGES};
@@ -48,6 +48,9 @@ pub struct ScyroxDevice {
 }
 
 /// Button choice values: indexes into `KeyAction::SIMPLE`, plus these.
+/// Where each of [`KEY_NAMES`] sits on the mouse.
+const KEY_POS: [ButtonPos; 6] =
+    [ButtonPos::Left, ButtonPos::Right, ButtonPos::Middle, ButtonPos::Back, ButtonPos::Forward, ButtonPos::Bottom];
 const CHOICE_FIRE: i64 = 100;
 const CHOICE_COMBO: i64 = 101;
 const CHOICE_MEDIA: i64 = 102;
@@ -438,15 +441,21 @@ impl Device for ScyroxDevice {
             }
             let mut label = name.to_string();
             label[..1].make_ascii_uppercase();
-            buttons.push_as(Role::Button(k as u8), Setting::new(format!("key.{k}"), label, Kind::Choice(options), Value::Int(value)));
+            let pos = KEY_POS[k];
+            let opt = Role::ButtonOption(pos);
+            buttons.push_as(Role::Button(pos), Setting::new(format!("key.{k}"), label, Kind::Choice(options), Value::Int(value)));
             if let KeyAction::Fire { interval, times } = s.keys[k] {
-                buttons.push_as(Role::ButtonOption(k as u8), Setting::new(
-                    format!("fire_interval.{k}"),
-                    "  Fire interval",
-                    Kind::range_unit(*FIRE_INTERVAL.start() as i64, *FIRE_INTERVAL.end() as i64, 1, 1.0, " ms"),
-                    Value::Int(interval as i64),
-                ));
-                buttons.push_as(Role::ButtonOption(k as u8), 
+                buttons.push_as(
+                    opt,
+                    Setting::new(
+                        format!("fire_interval.{k}"),
+                        "  Fire interval",
+                        Kind::range_unit(*FIRE_INTERVAL.start() as i64, *FIRE_INTERVAL.end() as i64, 1, 1.0, " ms"),
+                        Value::Int(interval as i64),
+                    ),
+                );
+                buttons.push_as(
+                    opt,
                     Setting::new(
                         format!("fire_times.{k}"),
                         "  Fire clicks",
@@ -458,13 +467,17 @@ impl Device for ScyroxDevice {
             }
             match s.keys[k] {
                 KeyAction::Shortcut => match &s.shortcuts[k] {
-                    Some(sc) if sc.is_media() => buttons.push_as(Role::ButtonOption(k as u8), Setting::new(
-                        format!("media.{k}"),
-                        "  Media key",
-                        Kind::choice(MEDIA_TABLE.iter().map(|(l, v)| (*v as i64, *l))),
-                        Value::Int(sc.0[0].value as i64),
-                    )),
-                    sc => buttons.push_as(Role::ButtonOption(k as u8), 
+                    Some(sc) if sc.is_media() => buttons.push_as(
+                        opt,
+                        Setting::new(
+                            format!("media.{k}"),
+                            "  Media key",
+                            Kind::choice(MEDIA_TABLE.iter().map(|(l, v)| (*v as i64, *l))),
+                            Value::Int(sc.0[0].value as i64),
+                        ),
+                    ),
+                    sc => buttons.push_as(
+                        opt,
                         Setting::new(
                             format!("combo.{k}"),
                             "  Keys",
@@ -476,7 +489,8 @@ impl Device for ScyroxDevice {
                 },
                 KeyAction::Macro { cycle: c } => {
                     let events = s.macros[k].as_ref().map(|m| events_to_text(&m.events)).unwrap_or_default();
-                    buttons.push_as(Role::ButtonOption(k as u8), 
+                    buttons.push_as(
+                        opt,
                         Setting::new(format!("macro.{k}"), "  Macro", Kind::Text { max_len: 2000 }, Value::Text(events))
                             .help("Events separated by spaces: +Key press, -Key release, Key tap, @ms delay after, e.g. +ShiftLeft H -ShiftLeft I@50. Mouse buttons: mouse-left …"),
                     );
@@ -490,7 +504,7 @@ impl Device for ScyroxDevice {
                     if !repeats.iter().any(|(v, _)| *v == c as i64) {
                         repeats.push((c as i64, cycle::label(c)));
                     }
-                    buttons.push_as(Role::ButtonOption(k as u8), Setting::new(format!("macro_repeat.{k}"), "  Repeat", Kind::Choice(repeats), Value::Int(c as i64)));
+                    buttons.push_as(opt, Setting::new(format!("macro_repeat.{k}"), "  Repeat", Kind::Choice(repeats), Value::Int(c as i64)));
                 }
                 _ => {}
             }

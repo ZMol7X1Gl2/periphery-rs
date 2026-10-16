@@ -10,7 +10,7 @@ use periphery_core::hid::Instant;
 use periphery_core::unknown::UnknownDevice;
 use periphery_core::{DeviceInfo, DeviceKind, KeyPair, KeyPairList, KeyProperty, Keymap, Kind, Setting, Snapshot, Value};
 
-use crate::mouse::{self, MouseTab};
+use crate::mouse::{self, MouseState, MouseTab};
 use crate::platform::{self, ReqSender};
 use crate::request::{self, Existing};
 use crate::worker::{Msg, Req};
@@ -73,7 +73,7 @@ pub struct App {
     /// Dry-run result: source, backup JSON, planned changes.
     restore_plan: Option<(String, String, Vec<String>)>,
     tab: Tab,
-    mouse_tab: MouseTab,
+    mouse: MouseState,
     layer: usize,
     selected_key: Option<(u8, u8)>,
     key_group: usize,
@@ -126,7 +126,7 @@ impl App {
             info: None,
             restore_plan: None,
             tab: Tab::Settings,
-            mouse_tab: MouseTab::default(),
+            mouse: MouseState::default(),
             layer: 0,
             selected_key: None,
             key_group: 0,
@@ -161,7 +161,7 @@ impl App {
         self.pair_pick.clear();
         self.prop_value = None;
         self.tab = Tab::Settings;
-        self.mouse_tab = MouseTab::default();
+        self.mouse = MouseState::default();
         self.send(Req::Select(i));
     }
 
@@ -188,7 +188,7 @@ impl App {
                             self.tab = Tab::Keymap;
                         }
                         if let Some(t) = self.want_mouse_tab.take() {
-                            self.mouse_tab = t;
+                            self.mouse.tab = t;
                         }
                     }
                 }
@@ -502,7 +502,7 @@ impl App {
         let brand = self.selected.and_then(|i| self.devices.get(i)).map_or_else(String::new, |d| d.brand.clone());
         let Some(mut snap) = self.snap.take() else { return };
         let mut edits = mouse::Edits::default();
-        mouse::show(ui, &mut snap, &mut self.mouse_tab, &brand, &mut edits);
+        mouse::show(ui, &mut snap, &mut self.mouse, &brand, &mut edits);
         self.snap = Some(snap);
         for (id, v) in edits.changes {
             self.queue(&id, v);

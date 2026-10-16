@@ -3,7 +3,7 @@
 
 use anyhow::{Result, bail};
 use periphery_core::hid::{Api, DeviceInfo as HidInfo, Filter};
-use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Role, Setting, Snapshot, Value, async_trait};
+use periphery_core::{ButtonPos, Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Role, Setting, Snapshot, Value, async_trait};
 use rongyuan::pan1080::{
     ACTIONS, BUTTONS, DEFAULT_COLORS, DEFAULT_DPIS, DpiStage, Options, REPORT_RATES, action_label,
 };
@@ -47,6 +47,9 @@ pub struct RongyuanDevice {
 
 /// Choice value for a button action this adapter can't name (left as is).
 const CHOICE_OTHER: i64 = 1000;
+/// Where each of [`BUTTONS`] sits on the mouse.
+const BUTTON_POS: [ButtonPos; 6] =
+    [ButtonPos::Left, ButtonPos::Right, ButtonPos::Middle, ButtonPos::Forward, ButtonPos::Back, ButtonPos::Top];
 
 fn device_info(mouse: &Mouse) -> DeviceInfo {
     let (brand, model) = match mouse.model() {
@@ -214,7 +217,7 @@ impl Device for RongyuanDevice {
                     CHOICE_OTHER
                 }
             };
-            g.push_as(Role::Button(k as u8), Setting::new(format!("key.{k}"), *name, Kind::Choice(options), Value::Int(value)));
+            g.push_as(Role::Button(BUTTON_POS[k]), Setting::new(format!("key.{k}"), *name, Kind::Choice(options), Value::Int(value)));
         }
         out.groups.push(g);
 

@@ -173,8 +173,9 @@ Guidelines:
   …)` or `setting.role(…)`). The GUI shows a mouse with tagged settings on
   one shared page whatever the brand: profile and settings source above
   the tabs, then *DPI & polling* (`PollingRate`, `StageCount`,
-  `ActiveStage`, `Dpi(n)`, `StageColor(n)`), *Buttons* (`Button(n)`, with
-  `ButtonOption(n)` for its sub-settings), *Sensor* (`LiftOff`,
+  `ActiveStage`, `Dpi(n)`, `StageColor(n)`), *Buttons* (`Button(pos)`, with
+  `ButtonOption(pos)` for its sub-settings; `pos` is a `ButtonPos` saying
+  where the button sits, so the GUI can draw it on its generic mouse), *Sensor* (`LiftOff`,
   `MotionSync`, `AngleSnap`, `Ripple`, `Debounce`), *Lighting* and *Power &
   device* (`Sleep`, `Wireless`, `FactoryReset`). Leave settings only your
   brand has untagged: they go on the brand's own tab under their group

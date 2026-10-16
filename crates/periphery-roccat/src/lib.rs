@@ -4,7 +4,7 @@
 
 use anyhow::{Result, bail};
 use periphery_core::hid::{Api, Filter};
-use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Role, Setting, Snapshot, Value, async_trait};
+use periphery_core::{ButtonPos, Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Role, Setting, Snapshot, Value, async_trait};
 use roccat::keys::{parse_shortcut, shortcut_label};
 use roccat::kone_aimo::{
     ACTIONS, BUTTON_NAMES, DPI_STAGES, EFFECTS, PROFILES, REPORT_RATES, SLOTS, SPEEDS, VENDOR_ID, Zone, action,
@@ -63,6 +63,21 @@ pub struct RoccatDevice {
 }
 
 /// Shortcut used when a button is switched to "Keyboard shortcut".
+/// Where each of [`BUTTON_NAMES`] sits on the mouse.
+const BUTTON_POS: [ButtonPos; 12] = [
+    ButtonPos::Left,
+    ButtonPos::Right,
+    ButtonPos::Middle,
+    ButtonPos::TiltLeft,
+    ButtonPos::TiltRight,
+    ButtonPos::WheelUp,
+    ButtonPos::WheelDown,
+    ButtonPos::Forward,
+    ButtonPos::Back,
+    ButtonPos::Thumb,
+    ButtonPos::TopFront,
+    ButtonPos::TopBack,
+];
 const DEFAULT_SHORTCUT: (u8, u8) = (0x01, 0x06); // Ctrl + C
 
 impl RoccatDevice {
@@ -227,7 +242,7 @@ impl Device for RoccatDevice {
             // Easy-Shift slots are ROCCAT-only, so they stay untagged.
             let normal_slot = slot < BUTTON_NAMES.len();
             if normal_slot {
-                setting = setting.role(Role::Button(slot as u8));
+                setting = setting.role(Role::Button(BUTTON_POS[slot]));
             }
             g.push(setting);
             if a == action::SHORTCUT {
@@ -240,7 +255,7 @@ impl Device for RoccatDevice {
                 )
                 .help("Modifiers and one key joined by +, e.g. Ctrl+Shift+S");
                 if normal_slot {
-                    keys = keys.role(Role::ButtonOption(slot as u8));
+                    keys = keys.role(Role::ButtonOption(BUTTON_POS[slot]));
                 }
                 g.push(keys);
             }

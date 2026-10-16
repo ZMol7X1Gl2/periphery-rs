@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 use logitech_hidpp::profile::{Binding, DPI_STAGES, LED_SLOTS, Led, NAME_LEN, Profile, effect, special};
 use logitech_hidpp::{Charging, Device as Hidpp, DpiInfo, LedZone, Mode, OnboardInfo, ROM_BASE};
 use periphery_core::hid::{Api, Filter};
-use periphery_core::{Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Role, Setting, Snapshot, Value, async_trait};
+use periphery_core::{ButtonPos, Device, DeviceInfo, DeviceKind, Driver, Group, Kind, Role, Setting, Snapshot, Value, async_trait};
 
 pub struct LogitechDriver;
 
@@ -65,6 +65,7 @@ const SPECIALS: [(u8, &str); 10] = [
     (special::PROFILE_DOWN, "Previous profile"),
 ];
 const BUTTON_NAMES: [&str; 5] = ["Left", "Right", "Middle", "Back", "Forward"];
+const BUTTON_POS: [ButtonPos; 5] = [ButtonPos::Left, ButtonPos::Right, ButtonPos::Middle, ButtonPos::Back, ButtonPos::Forward];
 const EFFECTS: [(u16, &str); 4] =
     [(effect::OFF, "Off"), (effect::STATIC, "Static colour"), (effect::CYCLE, "Colour cycle"), (effect::BREATHE, "Breathing")];
 
@@ -285,7 +286,7 @@ impl LogitechMouse {
             b.push(tag(
                 Setting::new(format!("p.button.{i}"), BUTTON_NAMES[i], Kind::Choice(opts), Value::Int(value))
                     .help("Stored in the onboard profile. DPI and profile functions use libratbag's documented codes."),
-                Role::Button(i as u8),
+                Role::Button(BUTTON_POS[i]),
             ));
         }
         b.push(Setting::action(
