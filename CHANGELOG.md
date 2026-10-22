@@ -50,6 +50,12 @@ release workflow turns Unreleased into the new version.
   of its own, and action rows say Start… or Run instead of repeating
   their name.
 - On/off settings are switches instead of checkboxes.
+- Text is set in Inter, and the icons (device kinds, rescan, backup,
+  restore, banners, links) are one consistent line-icon set instead of
+  emoji that looked different on every system. Selected choices keep
+  rounded corners.
+- Periphery has a logo: a tile with a P and two pairs of stars. It's in the
+  sidebar, and it's the desktop app's window and taskbar icon.
 
 ## [0.3.0-rc.2] - 2026-10-15
 

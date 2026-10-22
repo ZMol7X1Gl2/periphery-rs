@@ -9,7 +9,7 @@ use eframe::egui::{self, RichText, Ui};
 use periphery_core::{ButtonPos, Group, Kind, Role, Setting, Snapshot, Value};
 
 use crate::mouse_diagram::{self, ButtonInfo};
-use crate::theme::{self, card};
+use crate::theme::{self, Semibold, card, icon, size};
 use crate::ui::{setting_row, setting_widget};
 
 /// Polling rates with at most this many choices show as a row of buttons.
@@ -208,7 +208,7 @@ fn profile_bar(ui: &mut Ui, groups: &mut [Group], e: &mut Edits) {
     ui.horizontal_wrapped(|ui| {
         for role in roles {
             let Some(s) = with_role(groups, role) else { continue };
-            let label = ui.label(RichText::new(s.label.trim()).strong());
+            let label = ui.label(RichText::new(s.label.trim()).semibold());
             if let Some(h) = &s.help {
                 label.on_hover_text(h);
             }
@@ -266,7 +266,7 @@ fn buttons(ui: &mut Ui, groups: &mut [Group], selected: &mut Option<ButtonPos>, 
                 }
                 if settings(groups).any(|s| s.role == Some(Role::ButtonOption(pos))) {
                     ui.add_space(10.0);
-                    ui.label(RichText::new("Options").strong());
+                    ui.label(RichText::new("Options").semibold());
                     ui.add_space(4.0);
                     rows(ui, "button-options", groups, e, |r| r == Some(Role::ButtonOption(pos)));
                 }
@@ -292,7 +292,7 @@ fn choice_label(s: &Setting) -> String {
 /// Every action the button can take, as buttons in category tabs. Typing
 /// in the filter searches all categories.
 fn button_editor(ui: &mut Ui, s: &mut Setting, picker: &mut ActionPicker, e: &mut Edits) {
-    ui.label(RichText::new(s.label.trim()).strong().size(17.0));
+    ui.label(RichText::new(s.label.trim()).size(size::HEADING).semibold());
     ui.label(RichText::new(format!("Currently: {}", choice_label(s))).weak());
     if let Some(h) = &s.help {
         ui.label(RichText::new(h).weak().small());
@@ -309,9 +309,9 @@ fn button_editor(ui: &mut Ui, s: &mut Setting, picker: &mut ActionPicker, e: &mu
     ui.horizontal_wrapped(|ui| {
         let searching = !picker.filter.is_empty();
         for c in &present {
-            let mut text = RichText::new(c.title()).size(14.0);
+            let mut text = RichText::new(c.title());
             if current == Some(*c) {
-                text = text.strong();
+                text = text.semibold();
             }
             let tab = egui::SelectableLabel::new(!searching && shown == Some(*c), text);
             if ui.add(tab).on_hover_text(if current == Some(*c) { "Holds the current action" } else { "" }).clicked() {
@@ -321,7 +321,7 @@ fn button_editor(ui: &mut Ui, s: &mut Setting, picker: &mut ActionPicker, e: &mu
             }
         }
         ui.add_space(8.0);
-        ui.add(egui::TextEdit::singleline(&mut picker.filter).hint_text("🔍 Search all").desired_width(140.0));
+        ui.add(egui::TextEdit::singleline(&mut picker.filter).hint_text(format!("{}  Search all", icon::MAGNIFYING_GLASS)).desired_width(140.0));
     });
     ui.separator();
 
@@ -330,7 +330,7 @@ fn button_editor(ui: &mut Ui, s: &mut Setting, picker: &mut ActionPicker, e: &mu
     egui::ScrollArea::vertical().id_salt("button-actions").max_height(320.0).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             for (o, l) in opts.iter().filter(|(_, l)| visible(l)) {
-                let button = egui::Button::new(l).selected(*v == *o).min_size(egui::vec2(104.0, 30.0));
+                let button = theme::choice_button(l, *v == *o).min_size(egui::vec2(104.0, 30.0));
                 if ui.add(button).clicked() && *v != *o {
                     *v = *o;
                     e.changes.push((s.id.clone(), Value::Int(*o)));
@@ -389,7 +389,7 @@ fn polling_rate(ui: &mut Ui, s: &mut Setting, e: &mut Edits) {
         (Kind::Choice(opts), Value::Int(v)) if opts.len() <= MAX_RATE_BUTTONS => {
             ui.horizontal_wrapped(|ui| {
                 for (o, l) in opts {
-                    let button = egui::Button::new(RichText::new(l).size(14.0)).selected(*v == *o).min_size(egui::vec2(72.0, 30.0));
+                    let button = theme::choice_button(l, *v == *o).min_size(egui::vec2(72.0, 30.0));
                     if ui.add(button).clicked() && *v != *o {
                         *v = *o;
                         e.changes.push((s.id.clone(), Value::Int(*o)));
@@ -411,11 +411,11 @@ fn dpi(ui: &mut Ui, groups: &mut [Group], e: &mut Edits) {
             ui.horizontal(|ui| {
                 ui.label(s.label.trim());
                 let before = *n;
-                if ui.add_enabled(*n > *min, egui::Button::new(" − ")).clicked() {
+                if ui.add_enabled(*n > *min, egui::Button::new(icon::MINUS)).clicked() {
                     *n -= 1;
                 }
-                ui.label(RichText::new(n.to_string()).strong().monospace().size(15.0));
-                if ui.add_enabled(*n < *max, egui::Button::new(" + ")).clicked() {
+                ui.label(RichText::new(n.to_string()).size(size::SECTION).semibold());
+                if ui.add_enabled(*n < *max, egui::Button::new(icon::PLUS)).clicked() {
                     *n += 1;
                 }
                 if *n != before {
@@ -488,7 +488,7 @@ fn device(ui: &mut Ui, groups: &mut [Group], e: &mut Edits) {
             ui.label(RichText::new("Puts every setting on the mouse back to how it left the factory.").weak());
             ui.add_space(4.0);
             let button = egui::Button::new(RichText::new(format!("{}…", s.label.trim())).color(egui::Color32::WHITE))
-                .fill(egui::Color32::from_rgb(180, 60, 55));
+                .fill(theme::DANGER);
             if ui.add(button).clicked() {
                 match &s.kind {
                     Kind::Action { confirm: Some(q) } => e.confirm = Some((s.id.clone(), q.clone())),

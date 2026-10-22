@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/cover.svg" alt="Periphery: one app for every mouse and keyboard" width="100%"></p>
+
 # Periphery
 
 One app to configure mice and keyboards from different brands, instead of each

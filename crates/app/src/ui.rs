@@ -13,12 +13,11 @@ use periphery_core::{DeviceInfo, DeviceKind, KeyPair, KeyPairList, KeyProperty, 
 use crate::mouse::{self, MouseState, MouseTab};
 use crate::platform::{self, ReqSender};
 use crate::request::{self, Existing};
-use crate::theme;
+use crate::theme::{self, Semibold, icon, radius, size};
 use crate::worker::{Msg, Req};
 
 const REFRESH_NOTICE: Duration = Duration::from_secs(3);
 const REFRESH_IDLE: Duration = Duration::from_secs(30);
-const RED: Color32 = Color32::from_rgb(220, 70, 60);
 
 /// What to show first (desktop: `--device <name>`, `--tab keymap[:<setting>]`
 /// or a mouse tab: `--tab buttons`).
@@ -232,10 +231,10 @@ impl App {
 
 fn kind_icon(k: DeviceKind) -> &'static str {
     match k {
-        DeviceKind::Mouse => "🖱",
-        DeviceKind::Keyboard => "⌨",
-        DeviceKind::Headset => "🎧",
-        DeviceKind::Other => "🔌",
+        DeviceKind::Mouse => icon::MOUSE,
+        DeviceKind::Keyboard => icon::KEYBOARD,
+        DeviceKind::Headset => icon::HEADPHONES,
+        DeviceKind::Other => icon::PLUG,
     }
 }
 
@@ -254,19 +253,20 @@ fn device_row(ui: &mut Ui, d: &DeviceInfo, selected: bool) -> egui::Response {
     let v = ui.visuals().clone();
     let painter = ui.painter();
     if selected {
-        painter.rect_filled(rect, 8.0, theme::ACCENT.gamma_multiply(0.22));
+        painter.rect_filled(rect, radius::MD, theme::ACCENT.gamma_multiply(0.22));
         let bar = egui::Rect::from_min_size(rect.left_top() + egui::vec2(0.0, 12.0), egui::vec2(3.0, rect.height() - 24.0));
-        painter.rect_filled(bar, 2.0, theme::ACCENT);
+        painter.rect_filled(bar, radius::SM, theme::ACCENT);
     } else if resp.hovered() {
-        painter.rect_filled(rect, 8.0, v.widgets.hovered.weak_bg_fill);
+        painter.rect_filled(rect, radius::MD, v.widgets.hovered.weak_bg_fill);
     }
     let text = v.text_color();
-    painter.text(rect.left_center() + egui::vec2(22.0, 0.0), egui::Align2::CENTER_CENTER, kind_icon(d.kind), egui::FontId::proportional(20.0), text);
+    let icon_color = if selected { theme::ACCENT } else { v.weak_text_color() };
+    painter.text(rect.left_center() + egui::vec2(22.0, 0.0), egui::Align2::CENTER_CENTER, kind_icon(d.kind), egui::FontId::proportional(20.0), icon_color);
     let x = rect.left() + 44.0;
     let width = rect.right() - x - 6.0;
-    let title = ui.fonts(|f| f.layout(d.title(), egui::FontId::proportional(14.0), text, width));
+    let title = ui.fonts(|f| f.layout(d.title(), egui::FontId::new(size::BODY, theme::semibold()), text, width));
     let sub = format!("{} · {}", kind_name(d.kind), d.brand);
-    let sub = ui.fonts(|f| f.layout(sub, egui::FontId::proportional(11.5), v.weak_text_color(), width));
+    let sub = ui.fonts(|f| f.layout(sub, egui::FontId::proportional(size::SMALL), v.weak_text_color(), width));
     let title_h = title.size().y;
     let top = rect.center().y - (title_h + sub.size().y + 2.0) / 2.0;
     painter.galley(egui::pos2(x, top), title, text);
@@ -299,7 +299,7 @@ impl eframe::App for App {
         egui::SidePanel::left("devices").resizable(false).exact_width(240.0).frame(side).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 theme::logo(ui, 24.0);
-                ui.label(RichText::new("Periphery").size(20.0).strong());
+                ui.label(RichText::new("Periphery").size(size::HEADING).semibold());
             });
             ui.add_space(14.0);
             ui.label(RichText::new("DEVICES").small().weak());
@@ -319,7 +319,7 @@ impl eframe::App for App {
             ui.add_space(10.0);
             let full = egui::vec2(ui.available_width(), 32.0);
             if platform::ASKS_FOR_DEVICES
-                && ui.add(egui::Button::new("+  Connect a device…").min_size(full)).on_hover_text("Choose devices to give this page access to").clicked()
+                && ui.add(egui::Button::new(format!("{}  Connect a device…", icon::PLUS)).min_size(full)).on_hover_text("Choose devices to give this page access to").clicked()
             {
                 self.send(Req::Request(false));
             }
@@ -328,11 +328,11 @@ impl eframe::App for App {
             {
                 self.send(Req::Request(true));
             }
-            if ui.add(egui::Button::new("⟳  Rescan").min_size(full)).clicked() {
+            if ui.add(egui::Button::new(format!("{}  Rescan", icon::ARROWS_CLOCKWISE)).min_size(full)).clicked() {
                 self.send(Req::Discover);
             }
             for e in &self.discover_errors {
-                ui.label(RichText::new(e).small().color(RED));
+                ui.label(RichText::new(e).small().color(theme::DANGER));
             }
             self.unknown_list(ui);
         });
@@ -383,23 +383,23 @@ impl App {
     fn header(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             if let Some(d) = self.selected.and_then(|i| self.devices.get(i)) {
-                ui.label(RichText::new(d.title()).size(24.0).strong());
+                ui.label(RichText::new(d.title()).size(size::TITLE).semibold());
                 if self.busy > 0 || !self.pending.is_empty() {
                     ui.spinner().on_hover_text("Talking to the device…");
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let dev = self.selected;
-                if ui.add_enabled(dev.is_some(), egui::Button::new("Restore…")).on_hover_text("Load a backup; shows the changes before writing").clicked() {
+                if ui.add_enabled(dev.is_some(), egui::Button::new(format!("{}  Restore…", icon::UPLOAD_SIMPLE))).on_hover_text("Load a backup; shows the changes before writing").clicked() {
                     platform::pick_restore(self.local.clone(), ui.ctx().clone());
                 }
-                if ui.add_enabled(dev.is_some(), egui::Button::new("Backup…")).on_hover_text("Save every setting, the keymap and per-key settings to a file").clicked() {
+                if ui.add_enabled(dev.is_some(), egui::Button::new(format!("{}  Backup…", icon::DOWNLOAD_SIMPLE))).on_hover_text("Save every setting, the keymap and per-key settings to a file").clicked() {
                     let name = self.selected.and_then(|i| self.devices.get(i)).map_or("device".to_string(), |d| d.title().replace(' ', "-"));
                     if let Some(target) = platform::pick_backup_target(&format!("{name}.json")) {
                         self.send(Req::Backup(dev.unwrap(), target));
                     }
                 }
-                if ui.add(egui::Button::new("⟳")).on_hover_text("Read the device again").clicked() {
+                if ui.add(egui::Button::new(icon::ARROWS_CLOCKWISE)).on_hover_text("Read the device again").clicked() {
                     self.send(Req::Refresh);
                 }
             });
@@ -415,13 +415,13 @@ impl App {
         }
         if let Some(i) = self.info.clone() {
             ui.add_space(6.0);
-            if theme::banner(ui, theme::GOOD, &i, true) {
+            if theme::banner(ui, theme::GOOD, &format!("{}  {i}", icon::CHECK_CIRCLE), true) {
                 self.info = None;
             }
         }
         if let Some(e) = self.error.clone() {
             ui.add_space(6.0);
-            if theme::banner(ui, RED, &format!("⚠  {e}"), true) {
+            if theme::banner(ui, theme::DANGER, &format!("{}  {e}", icon::WARNING_CIRCLE), true) {
                 self.error = None;
             }
         }
@@ -437,7 +437,7 @@ impl App {
         let mut lookup = None;
         for d in &self.unknown {
             ui.add_space(4.0);
-            ui.label(format!("🔌  {}", d.name())).on_hover_text(d.report());
+            ui.label(format!("{}  {}", icon::PLUG, d.name())).on_hover_text(d.report());
             ui.label(RichText::new(d.id()).small().weak());
             let new_issue = request::new_issue_url(d, &platform::name());
             match self.lookups.get(&d.id()) {
@@ -454,12 +454,12 @@ impl App {
                 }
                 Some(Lookup::Done(Some(e))) => {
                     let state = if e.open { "open" } else { "closed" };
-                    ui.hyperlink_to(format!("Already requested: #{} ({state}) ↗", e.number), &e.url)
-                        .on_hover_text("Add a 👍 or details there");
-                    ui.hyperlink_to(RichText::new("New request anyway ↗").small(), new_issue);
+                    ui.hyperlink_to(format!("Already requested: #{} ({state}) {}", e.number, icon::ARROW_SQUARE_OUT), &e.url)
+                        .on_hover_text("Add a thumbs-up or details there");
+                    ui.hyperlink_to(RichText::new(format!("New request anyway {}", icon::ARROW_SQUARE_OUT)).small(), new_issue);
                 }
                 Some(Lookup::Done(None)) => {
-                    ui.hyperlink_to("Open the request form ↗", new_issue).on_hover_text("Opens a prefilled GitHub issue; you can edit it before submitting");
+                    ui.hyperlink_to(format!("Open the request form {}", icon::ARROW_SQUARE_OUT), new_issue).on_hover_text("Opens a prefilled GitHub issue; you can edit it before submitting");
                 }
             }
         }
@@ -484,7 +484,7 @@ impl App {
             ui.label(format!("{} change(s) will be written:", lines.len()));
             egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                 for l in &lines {
-                    ui.label(RichText::new(l).monospace().size(12.0));
+                    ui.label(RichText::new(l).monospace().size(size::SMALL));
                 }
             });
             ui.horizontal(|ui| {
@@ -818,7 +818,7 @@ impl App {
                 rect.min + egui::vec2(k.x * unit + 2.0, k.y * unit + 2.0),
                 egui::vec2(k.w * unit - 4.0, k.h * unit - 4.0),
             );
-            let text = RichText::new(&label).size(if label.chars().count() > 5 { 10.0 } else { 13.0 });
+            let text = RichText::new(&label).size(if label.chars().count() > 5 { size::TINY } else { size::MONO });
             let mut button = egui::Button::new(text).wrap();
             if let Some(c) = fill {
                 button = button.fill(c);
@@ -872,7 +872,7 @@ impl App {
         };
         let idx = row as usize * km.cols as usize + col as usize;
         let current = km.labels.get(layer).and_then(|l| l.get(idx)).cloned().unwrap_or_default();
-        ui.label(RichText::new(format!("Key at row {row}, col {col} on {} — currently “{current}”", km.layer_names[layer])).strong());
+        ui.label(RichText::new(format!("Key at row {row}, col {col} on {} — currently “{current}”", km.layer_names[layer])).semibold());
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
             for (i, g) in km.catalog.iter().enumerate() {
@@ -907,7 +907,7 @@ impl App {
             return;
         }
         ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("{} key(s) selected", self.multi.len())).strong());
+            ui.label(RichText::new(format!("{} key(s) selected", self.multi.len())).semibold());
             if ui.button("Select all").clicked() {
                 self.multi = km.layout.iter().map(|k| (k.row, k.col)).collect();
             }
@@ -944,7 +944,7 @@ impl App {
         let mut remove = None;
         for (i, p) in new_list.iter_mut().enumerate() {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("#{}  {} + {}", i + 1, name(p.a), name(p.b))).strong());
+                ui.label(RichText::new(format!("#{}  {} + {}", i + 1, name(p.a), name(p.b))).semibold());
                 let kind = Kind::Choice(list.modes.clone());
                 let mut v = Value::Int(p.mode);
                 if value_editor(ui, &format!("pairmode{i}"), &kind, &mut v) {

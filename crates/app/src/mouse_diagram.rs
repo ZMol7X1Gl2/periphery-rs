@@ -10,6 +10,8 @@ use std::sync::OnceLock;
 use eframe::egui::{self, Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use periphery_core::ButtonPos;
 
+use crate::theme::{radius, size};
+
 /// Half the body length in points.
 const R: f32 = 150.0;
 /// Half the gap between the left and right buttons, where the wheel sits.
@@ -216,7 +218,7 @@ pub fn show(ui: &mut Ui, buttons: &BTreeMap<ButtonPos, ButtonInfo>, selected: Op
         polygon(&painter, &pts, fill(pos, over), stroke(pos));
         let side = if pos == ButtonPos::Left { -1.0 } else { 1.0 };
         let text_color = if selected == Some(pos) { v.selection.stroke.color } else { v.text_color() };
-        painter.text(to_screen(pos2(side * 0.28, -0.3)), Align2::CENTER_CENTER, shorten(&info.binding, 11), FontId::proportional(12.0), text_color);
+        painter.text(to_screen(pos2(side * 0.28, -0.3)), Align2::CENTER_CENTER, shorten(&info.binding, 11), FontId::proportional(size::SMALL), text_color);
         if resp.clicked() && resp.interact_pointer_pos().is_some_and(|p| inside(&pts, p)) {
             clicked = Some(pos);
         }
@@ -227,7 +229,7 @@ pub fn show(ui: &mut Ui, buttons: &BTreeMap<ButtonPos, ButtonInfo>, selected: Op
 
     // The wheel slot is always drawn; it's part of what makes it a mouse.
     let wheel = to_screen_rect(unit_rect(WHEEL.0, WHEEL.1, WHEEL.2, WHEEL.3));
-    painter.rect(wheel.expand(3.0), 6.0, v.extreme_bg_color, outline);
+    painter.rect(wheel.expand(3.0), radius::MD, v.extreme_bg_color, outline);
 
     for pos in ButtonPos::ALL {
         let (Some(info), Some(spot)) = (buttons.get(&pos), hotspot(pos)) else { continue };
@@ -242,7 +244,7 @@ pub fn show(ui: &mut Ui, buttons: &BTreeMap<ButtonPos, ButtonInfo>, selected: Op
         };
         match pos {
             ButtonPos::WheelUp | ButtonPos::WheelDown | ButtonPos::TiltLeft | ButtonPos::TiltRight => {
-                painter.rect(r, 4.0, f, st);
+                painter.rect(r, radius::SM, f, st);
                 let dir = match pos {
                     ButtonPos::WheelUp => vec2(0.0, -1.0),
                     ButtonPos::WheelDown => vec2(0.0, 1.0),
@@ -252,7 +254,7 @@ pub fn show(ui: &mut Ui, buttons: &BTreeMap<ButtonPos, ButtonInfo>, selected: Op
                 painter.add(arrow(dir));
             }
             ButtonPos::Middle => {
-                painter.rect(r, 6.0, f, st);
+                painter.rect(r, radius::MD, f, st);
                 for i in 1..6 {
                     let y = egui::lerp(r.top()..=r.bottom(), i as f32 / 6.0);
                     painter.line_segment([pos2(r.left() + 3.0, y), pos2(r.right() - 3.0, y)], Stroke::new(1.0_f32, outline.color));
@@ -260,10 +262,10 @@ pub fn show(ui: &mut Ui, buttons: &BTreeMap<ButtonPos, ButtonInfo>, selected: Op
             }
             ButtonPos::Bottom => {
                 painter.rect(r, r.height() / 2.0, f, st);
-                painter.text(r.center(), Align2::CENTER_CENTER, "underside", FontId::proportional(11.0), v.weak_text_color());
+                painter.text(r.center(), Align2::CENTER_CENTER, "underside", FontId::proportional(size::SMALL), v.weak_text_color());
             }
             _ => {
-                painter.rect(r, 4.0, f, st);
+                painter.rect(r, radius::SM, f, st);
             }
         }
         if resp.clicked() {
