@@ -53,7 +53,9 @@ release workflow turns Unreleased into the new version.
   (the search box looks through all of them). Extra options such as macro text or
   shortcut keys appear under the chosen action. Only the buttons the mouse
   has are drawn: side, thumb, wheel tilt and scroll, top and underside
-  buttons.
+  buttons. The mouse is drawn low-poly, after a modern symmetric shape: a
+  flat front, long main buttons inset from the shell, and the side buttons
+  along the left edge. The drawing takes only the room it needs.
 - New look: a darker theme with one accent colour, a sidebar listing each
   device with its kind and brand, the device's status (battery, firmware,
   connection) as chips under its name, pill-shaped tabs, rounded cards and
