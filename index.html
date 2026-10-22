@@ -7,8 +7,8 @@
   <meta name="description" content="Configure mice and keyboards from different brands in your browser.">
   
 <script type="module">
-import init, * as bindings from '/periphery-rs/periphery-web-f34da7079c228027.js';
-const wasm = await init({ module_or_path: '/periphery-rs/periphery-web-f34da7079c228027_bg.wasm' });
+import init, * as bindings from '/periphery-rs/periphery-web-b674182d56c877bb.js';
+const wasm = await init({ module_or_path: '/periphery-rs/periphery-web-b674182d56c877bb_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -30,7 +30,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
       font: 16px system-ui, sans-serif; padding: 16px; text-align: center; }
   </style>
-<link rel="modulepreload" href="/periphery-rs/periphery-web-f34da7079c228027.js" crossorigin="anonymous" integrity="sha384-pszZscXkW5RS3j+6dMkdCUub2zFwLm7Nomj1ZNHhWvFWsSbNgQTbIBSNWxV0sGOr"><link rel="preload" href="/periphery-rs/periphery-web-f34da7079c228027_bg.wasm" crossorigin="anonymous" integrity="sha384-cSPzCRBUVhJG7R1q9v6EFt0eKN3b/CAf/kaYIkYNiRVU/CGa5krTtappyD28WLAv" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/periphery-rs/periphery-web-b674182d56c877bb.js" crossorigin="anonymous" integrity="sha384-pszZscXkW5RS3j+6dMkdCUub2zFwLm7Nomj1ZNHhWvFWsSbNgQTbIBSNWxV0sGOr"><link rel="preload" href="/periphery-rs/periphery-web-b674182d56c877bb_bg.wasm" crossorigin="anonymous" integrity="sha384-BBnniYeI7RcexSfX/xRvkwTjB+ahRISB52p2AZEzz/8gVJ7b4xgxkYI5VGtuVOUr" as="fetch" type="application/wasm"></head>
 <body>
   <canvas id="periphery"></canvas>
   <div id="loading">Loading Periphery…</div>
