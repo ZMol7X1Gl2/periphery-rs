@@ -31,6 +31,11 @@ release workflow turns Unreleased into the new version.
 
 ### Changed
 
+- A Keychron Link receiver is listed as a receiver instead of failing with
+  "no reply to command 0x01". It passes typing on but not settings, so
+  selecting it explains that the keyboard needs a USB cable to be
+  configured.
+- Long notices and errors wrap instead of running off the window.
 - Ajazz mice: the active DPI stage is shown but can no longer be changed
   from Periphery. The AJ179 PRO ignores it, so trying to change it failed
   with "the mouse did not keep the DPI change". Use the DPI button on the

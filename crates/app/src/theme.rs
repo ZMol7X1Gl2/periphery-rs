@@ -282,18 +282,19 @@ pub fn banner(ui: &mut Ui, color: Color32, text: &str, closable: bool, link: Opt
         .rounding(radius::MD)
         .inner_margin(Margin::symmetric(12.0, 7.0))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(text).color(color));
-                if closable || link.is_some() {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if closable {
-                            close = ui.add(egui::Button::new(icon::X).frame(false).small()).clicked();
-                        }
-                        if let Some((label, url)) = link {
-                            ui.hyperlink_to(RichText::new(format!("{label} {}", icon::ARROW_SQUARE_OUT)).color(color).semibold(), url);
-                        }
-                    });
+            ui.set_width(ui.available_width());
+            // Close and link go on the right first, so the text wraps in the
+            // space left of them.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                if closable {
+                    close = ui.add(egui::Button::new(icon::X).frame(false).small()).clicked();
                 }
+                if let Some((label, url)) = link {
+                    ui.hyperlink_to(RichText::new(format!("{label} {}", icon::ARROW_SQUARE_OUT)).color(color).semibold(), url);
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                    ui.add(egui::Label::new(RichText::new(text).color(color)).wrap());
+                });
             });
         });
     close

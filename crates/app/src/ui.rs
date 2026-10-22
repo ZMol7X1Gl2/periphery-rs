@@ -234,6 +234,7 @@ fn kind_icon(k: DeviceKind) -> &'static str {
         DeviceKind::Mouse => icon::MOUSE,
         DeviceKind::Keyboard => icon::KEYBOARD,
         DeviceKind::Headset => icon::HEADPHONES,
+        DeviceKind::Receiver => icon::USB,
         DeviceKind::Other => icon::PLUG,
     }
 }
@@ -243,6 +244,7 @@ fn kind_name(k: DeviceKind) -> &'static str {
         DeviceKind::Mouse => "Mouse",
         DeviceKind::Keyboard => "Keyboard",
         DeviceKind::Headset => "Headset",
+        DeviceKind::Receiver => "Receiver",
         DeviceKind::Other => "Device",
     }
 }

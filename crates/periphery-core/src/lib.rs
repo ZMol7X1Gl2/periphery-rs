@@ -18,6 +18,8 @@ pub enum DeviceKind {
     Mouse,
     Keyboard,
     Headset,
+    /// A wireless receiver that can't configure the device paired with it.
+    Receiver,
     Other,
 }
 

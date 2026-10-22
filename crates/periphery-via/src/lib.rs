@@ -2,7 +2,7 @@
 //! extensions when present. Protocol code lives in the `qmk-via` crate.
 
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use periphery_core::hid::{Api, DeviceInfo as HidInfo, Filter};
 use periphery_core::{
     Device, DeviceInfo, DeviceKind, Driver, Group, KeyPair, KeyPairList, KeyProperty, Keymap, Kind,
@@ -34,9 +34,57 @@ impl Driver for ViaDriver {
         let mut out = Vec::new();
         for d in api.devices().filter(|d| FILTER.matches(d)) {
             let name = format!("{} ({:04x}:{:04x})", d.product.trim(), d.vendor_id, d.product_id);
-            out.push(ViaKeyboard::open(api, d).await.map(|k| Box::new(k) as Box<dyn Device>).context(name));
+            out.push(match ViaKeyboard::open(api, d).await {
+                Ok(k) => Ok(Box::new(k) as Box<dyn Device>),
+                Err(_) if Receiver::is_receiver(d) => Ok(Box::new(Receiver::new(d)) as Box<dyn Device>),
+                Err(e) => Err(e.context(name)),
+            });
         }
         out
+    }
+}
+
+/// A Keychron Link receiver. It has a VIA interface and passes typing on,
+/// but not configuration (Keychron's own Launcher needs a cable too), so it
+/// is listed with a note instead of as a failing keyboard. Should a
+/// receiver ever answer, it opens as a keyboard instead.
+pub struct Receiver {
+    info: DeviceInfo,
+}
+
+impl Receiver {
+    fn is_receiver(d: &HidInfo) -> bool {
+        d.vendor_id == KEYCHRON_VID && d.product.to_lowercase().contains("link")
+    }
+
+    fn new(d: &HidInfo) -> Self {
+        let model = d.product.trim().to_string();
+        Receiver { info: DeviceInfo { brand: "Keychron".into(), model, kind: DeviceKind::Receiver, vid: d.vendor_id, pid: d.product_id } }
+    }
+}
+
+#[async_trait(?Send)]
+impl Device for Receiver {
+    fn info(&self) -> &DeviceInfo {
+        &self.info
+    }
+
+    async fn snapshot(&mut self) -> Result<Snapshot> {
+        Ok(Snapshot {
+            status: vec![("Connection".into(), "2.4 GHz receiver".into())],
+            groups: Vec::new(),
+            keymap: None,
+            notice: Some(
+                "This is the receiver of a wireless Keychron keyboard. It passes typing on to the computer, but not \
+                 settings, so the keyboard can't be configured through it. Connect the keyboard with a USB cable, set \
+                 its switch to cable mode, then click Rescan."
+                    .into(),
+            ),
+        })
+    }
+
+    async fn set(&mut self, _id: &str, _value: &Value) -> Result<()> {
+        bail!("connect the keyboard with a USB cable to change its settings")
     }
 }
 
