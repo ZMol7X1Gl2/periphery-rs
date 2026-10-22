@@ -7,8 +7,8 @@
   <meta name="description" content="Configure mice and keyboards from different brands in your browser.">
   
 <script type="module">
-import init, * as bindings from '/periphery-rs/ui-unified-mouse/periphery-web-df16f63793e4b319.js';
-const wasm = await init({ module_or_path: '/periphery-rs/ui-unified-mouse/periphery-web-df16f63793e4b319_bg.wasm' });
+import init, * as bindings from '/periphery-rs/ui-unified-mouse/periphery-web-7d6ed619e1464528.js';
+const wasm = await init({ module_or_path: '/periphery-rs/ui-unified-mouse/periphery-web-7d6ed619e1464528_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -19,13 +19,13 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
   <style>
     /* Match the app's panel colour (crates/app/src/theme.rs) so loading doesn't flash. */
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #16181d; color: #c9ccd6; }
-    @media (prefers-color-scheme: light) { html, body { background: #f4f5f8; color: #3c3f47; } }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #111113; color: #c8c6c0; }
+    @media (prefers-color-scheme: light) { html, body { background: #f4f3ef; color: #3c3b38; } }
     canvas { display: block; width: 100%; height: 100%; }
     #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
       font: 16px system-ui, sans-serif; padding: 16px; text-align: center; }
   </style>
-<link rel="modulepreload" href="/periphery-rs/ui-unified-mouse/periphery-web-df16f63793e4b319.js" crossorigin="anonymous" integrity="sha384-V1Tr0LWujyjY7tGDsBlUl88vqdPfivq3UI/o4yjnUbS6bIfUZTxQxOyt0ea2SHLb"><link rel="preload" href="/periphery-rs/ui-unified-mouse/periphery-web-df16f63793e4b319_bg.wasm" crossorigin="anonymous" integrity="sha384-AeonrbvPiWAH2ERpvZFYNZaWibYMXkCfRKvP8yKEowVrmVxKdyI7xc2mR0jsB0hy" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/periphery-rs/ui-unified-mouse/periphery-web-7d6ed619e1464528.js" crossorigin="anonymous" integrity="sha384-ASwbm7OZF4vefUey+ooYzdBCmq7Fb8zaEMHqWi8zlKN2gW0L9cunwT+D+JZyxhFf"><link rel="preload" href="/periphery-rs/ui-unified-mouse/periphery-web-7d6ed619e1464528_bg.wasm" crossorigin="anonymous" integrity="sha384-sm4skOUiK3zoULJFCnq/0n8Lmwnh1ufPjBeo4midYcmd/qwfFaYre3xDmtRGx3Dm" as="fetch" type="application/wasm"></head>
 <body>
   <canvas id="periphery"></canvas>
   <div id="loading">Loading Periphery…</div>
