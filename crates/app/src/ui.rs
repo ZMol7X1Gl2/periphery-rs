@@ -20,7 +20,7 @@ const REFRESH_NOTICE: Duration = Duration::from_secs(3);
 const REFRESH_IDLE: Duration = Duration::from_secs(30);
 
 /// What to show first (desktop: `--device <name>`, `--tab keymap[:<setting>]`
-/// or a mouse tab: `--tab buttons`).
+/// or a mouse tab: `--tab buttons`), and `--test-devices`.
 #[derive(Clone, Debug, Default)]
 pub struct StartOptions {
     /// Preselect the first device whose title contains this (lowercase).
@@ -29,12 +29,15 @@ pub struct StartOptions {
     /// Per-key setting or pair list to open on the keymap tab (lowercase).
     pub km: Option<String>,
     pub mouse_tab: Option<MouseTab>,
+    /// Add a made-up unsupported device and a failed one to every scan, to
+    /// try Request support and Report a bug without such hardware.
+    pub test_devices: bool,
 }
 
 impl StartOptions {
     pub fn from_args(args: impl IntoIterator<Item = String>) -> Self {
         let args: Vec<String> = args.into_iter().collect();
-        let mut o = StartOptions::default();
+        let mut o = StartOptions { test_devices: args.iter().any(|a| a == "--test-devices"), ..Default::default() };
         for w in args.windows(2) {
             match w[0].as_str() {
                 "--device" => o.device = Some(w[1].to_lowercase()),
@@ -89,7 +92,23 @@ pub struct App {
     /// From `--tab keymap:<name>`: per-key setting or pair list to open.
     want_km: Option<String>,
     want_mouse_tab: Option<MouseTab>,
+    test_devices: bool,
 }
+
+/// A made-up device no driver handles, for `--test-devices`.
+fn test_unknown() -> UnknownDevice {
+    UnknownDevice {
+        vid: 0xffff,
+        pid: 0x0001,
+        product: "Periphery test device (not real)".into(),
+        manufacturer: String::new(),
+        collections: vec![(0x0001, 0x0002), (0xff00, 0x0001)],
+        interfaces: Vec::new(),
+    }
+}
+
+/// A made-up scan error, for `--test-devices`.
+const TEST_ERROR: &str = "qmk-via: Periphery test keyboard (ffff:0002): no reply to command 0x01 (test error, not a real device)";
 
 /// State of a "Request support" lookup.
 enum Lookup {
@@ -140,6 +159,7 @@ impl App {
             want_keymap: start.keymap,
             want_km: start.km,
             want_mouse_tab: start.mouse_tab,
+            test_devices: start.test_devices,
         };
         app.send(Req::Discover);
         app
@@ -174,7 +194,11 @@ impl App {
     fn poll(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
-                Msg::Devices(list, errors, unknown) => {
+                Msg::Devices(list, mut errors, mut unknown) => {
+                    if self.test_devices {
+                        unknown.push(test_unknown());
+                        errors.push(TEST_ERROR.into());
+                    }
                     self.unknown = unknown;
                     self.devices = list;
                     self.discover_errors = errors;

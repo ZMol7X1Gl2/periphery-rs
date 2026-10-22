@@ -12,7 +12,9 @@ fn main() {
             .get_element_by_id("periphery")
             .and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok())
             .expect("canvas #periphery");
-        let start = periphery::ui::StartOptions::default();
+        // `#test-devices` in the address adds made-up devices; see StartOptions.
+        let hash = web_sys::window().and_then(|w| w.location().hash().ok()).unwrap_or_default();
+        let start = periphery::ui::StartOptions { test_devices: hash == "#test-devices", ..Default::default() };
         let result = eframe::WebRunner::new()
             .start(canvas, eframe::WebOptions::default(), Box::new(|cc| Ok(Box::new(periphery::ui::App::new(cc, start)))))
             .await;
