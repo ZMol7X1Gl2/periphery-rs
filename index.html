@@ -17,6 +17,11 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>
+  <!-- The logo (docs/assets/logo.svg), with PNGs rendered from it for browsers without SVG icons and for iOS. -->
+  <link rel="icon" href="/periphery-rs/logo-237716886bf57953.svg" integrity="sha384-U6vKnVEclvLJjURcn5eSAT2tEfJY1/EZivITBW9Iq1FV2COgK7RJiRWHg/Fm4+X8"/>
+  <link rel="icon" href="/periphery-rs/favicon-32-e73dc71df9bbc730.png" integrity="sha384-w/g9yQHutcYAEXGDZeCLZ7f0742jZHLGy/K9iT8W3LiLvq2BCSkwHKuraaK/YPUu"/>
+  
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <style>
     /* Match the app's panel colour (crates/app/src/theme.rs) so loading doesn't flash. */
     html, body { margin: 0; height: 100%; overflow: hidden; background: #111113; color: #c8c6c0; }
