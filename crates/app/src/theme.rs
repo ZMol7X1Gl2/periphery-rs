@@ -271,11 +271,17 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, current: &mut T, items: &[(T,
     changed
 }
 
+/// What was clicked on a [`banner`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BannerClick {
+    Close,
+    Action,
+}
+
 /// A coloured banner for notices, errors and confirmations, with an optional
-/// link (label, URL) at its end. Returns true when its close button was
-/// clicked.
-pub fn banner(ui: &mut Ui, color: Color32, text: &str, closable: bool, link: Option<(&str, &str)>) -> bool {
-    let mut close = false;
+/// action button at its end.
+pub fn banner(ui: &mut Ui, color: Color32, text: &str, closable: bool, action: Option<&str>) -> Option<BannerClick> {
+    let mut click = None;
     egui::Frame::none()
         .fill(color.gamma_multiply(0.16))
         .stroke(Stroke::new(1.0_f32, color.gamma_multiply(0.5)))
@@ -283,19 +289,21 @@ pub fn banner(ui: &mut Ui, color: Color32, text: &str, closable: bool, link: Opt
         .inner_margin(Margin::symmetric(12.0, 7.0))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            // Close and link go on the right first, so the text wraps in the
-            // space left of them.
+            // Close and the action go on the right first, so the text wraps
+            // in the space left of them.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                if closable {
-                    close = ui.add(egui::Button::new(icon::X).frame(false).small()).clicked();
+                if closable && ui.add(egui::Button::new(icon::X).frame(false).small()).clicked() {
+                    click = Some(BannerClick::Close);
                 }
-                if let Some((label, url)) = link {
-                    ui.hyperlink_to(RichText::new(format!("{label} {}", icon::ARROW_SQUARE_OUT)).color(color).semibold(), url);
+                if let Some(label) = action
+                    && ui.add(egui::Button::new(RichText::new(label).color(color).semibold()).frame(false)).clicked()
+                {
+                    click = Some(BannerClick::Action);
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
                     ui.add(egui::Label::new(RichText::new(text).color(color)).wrap());
                 });
             });
         });
-    close
+    click
 }

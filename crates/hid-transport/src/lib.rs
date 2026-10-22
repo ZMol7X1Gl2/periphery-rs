@@ -35,6 +35,8 @@ use web as backend;
 
 pub use backend::{Api, Device};
 
+pub mod traffic;
+
 /// One HID top-level collection (on Windows, one openable device path).
 #[derive(Clone, Debug)]
 pub struct DeviceInfo {

@@ -21,6 +21,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HidCollectionInfo, HidDeviceFilter, HidDeviceRequestOptions, HidInputReportEvent};
 
+use crate::traffic::{self, Dir};
 use crate::{DeviceInfo, Filter};
 
 #[derive(Clone, Debug)]
@@ -86,7 +87,8 @@ impl Api {
             let _ = tx.unbounded_send(report);
         });
         dev.add_event_listener_with_callback("inputreport", on_report.as_ref().unchecked_ref()).map_err(js_err)?;
-        Ok(Device { dev, rx: RefCell::new(rx), on_report })
+        let id = format!("{:04x}:{:04x}", info.vendor_id, info.product_id);
+        Ok(Device { dev, rx: RefCell::new(rx), on_report, id })
     }
 
     /// Shows the browser's device picker (needs a recent click or key press)
@@ -141,6 +143,8 @@ pub struct Device {
     dev: web_sys::HidDevice,
     rx: RefCell<UnboundedReceiver<Vec<u8>>>,
     on_report: Closure<dyn FnMut(HidInputReportEvent)>,
+    /// vid:pid, for [`traffic`].
+    id: String,
 }
 
 impl Drop for Device {
@@ -154,6 +158,7 @@ impl Device {
     /// `data[0]` is the report id.
     pub async fn write(&self, data: &[u8]) -> Result<usize> {
         let Some((&id, body)) = data.split_first() else { bail!("empty report") };
+        traffic::note(&self.id, Dir::Write, data);
         let mut body = body.to_vec();
         JsFuture::from(self.dev.send_report_with_u8_slice(id, &mut body).map_err(js_err)?).await.map_err(js_err)?;
         Ok(data.len())
@@ -175,12 +180,14 @@ impl Device {
         let Some(report) = report else { return Ok(0) };
         let n = report.len().min(buf.len());
         buf[..n].copy_from_slice(&report[..n]);
+        traffic::note(&self.id, Dir::Read, &buf[..n]);
         Ok(n)
     }
 
     /// `data[0]` is the report id.
     pub async fn send_feature_report(&self, data: &[u8]) -> Result<()> {
         let Some((&id, body)) = data.split_first() else { bail!("empty report") };
+        traffic::note(&self.id, Dir::FeatureSet, data);
         let mut body = body.to_vec();
         JsFuture::from(self.dev.send_feature_report_with_u8_slice(id, &mut body).map_err(js_err)?).await.map_err(js_err)?;
         Ok(())
@@ -197,6 +204,7 @@ impl Device {
         }
         let n = (data.len() + 1).min(buf.len());
         buf[1..n].copy_from_slice(&data[..n - 1]);
+        traffic::note(&self.id, Dir::FeatureGet, &buf[..n]);
         Ok(n)
     }
 }

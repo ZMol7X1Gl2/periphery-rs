@@ -10,6 +10,15 @@ release workflow turns Unreleased into the new version.
 
 ## [Unreleased]
 
+### Added
+
+- **Report an issue**, a button in the bottom right corner (also behind
+  every **Report a bug** link): pick the recent actions that went wrong
+  (for example "Set Polling rate to 1000 Hz — failed: …"), describe what
+  happened, and open a prefilled GitHub issue you review before sending. **Copy full log** adds
+  the raw data exchanged with the device for those actions, to paste into
+  the issue. The history stays in memory and is gone when Periphery closes.
+
 ## [0.3.0] - 2026-10-22
 
 ### Added

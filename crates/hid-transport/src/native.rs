@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 
+use crate::traffic::{self, Dir};
 use crate::{DeviceInfo, Filter};
 
 #[derive(Clone, Debug)]
@@ -55,7 +56,7 @@ impl Api {
 
     pub async fn open(&self, info: &DeviceInfo) -> Result<Device> {
         let dev = self.api.open_path(&info.handle.path).map_err(|e| anyhow!(e))?;
-        Ok(Device { dev })
+        Ok(Device { dev, id: format!("{:04x}:{:04x}", info.vendor_id, info.product_id) })
     }
 
     /// Desktop apps see every device already; nothing to ask for.
@@ -66,26 +67,36 @@ impl Api {
 
 pub struct Device {
     dev: hidapi::HidDevice,
+    /// vid:pid, for [`traffic`].
+    id: String,
 }
 
 impl Device {
     pub async fn write(&self, data: &[u8]) -> Result<usize> {
+        traffic::note(&self.id, Dir::Write, data);
         Ok(self.dev.write(data)?)
     }
 
     /// Reads one input report into `buf`; 0 when nothing arrived in time.
     pub async fn read_timeout(&self, buf: &mut [u8], timeout: Duration) -> Result<usize> {
         let ms = timeout.as_millis().min(i32::MAX as u128) as i32;
-        Ok(self.dev.read_timeout(buf, ms)?)
+        let n = self.dev.read_timeout(buf, ms)?;
+        if n > 0 {
+            traffic::note(&self.id, Dir::Read, &buf[..n]);
+        }
+        Ok(n)
     }
 
     pub async fn send_feature_report(&self, data: &[u8]) -> Result<()> {
+        traffic::note(&self.id, Dir::FeatureSet, data);
         Ok(self.dev.send_feature_report(data)?)
     }
 
     /// `buf[0]` selects the report id; the reply is stored after it.
     pub async fn get_feature_report(&self, buf: &mut [u8]) -> Result<usize> {
-        Ok(self.dev.get_feature_report(buf)?)
+        let n = self.dev.get_feature_report(buf)?;
+        traffic::note(&self.id, Dir::FeatureGet, &buf[..n.min(buf.len())]);
+        Ok(n)
     }
 }
 

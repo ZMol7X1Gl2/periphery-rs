@@ -47,7 +47,9 @@ pub enum Msg {
     /// Existing support request for an unknown device (by its id), sent by
     /// the UI's lookup.
     RequestLookup(String, Result<Option<crate::request::Existing>, String>),
-    Done,
+    /// A request finished; carries the device traffic it caused, for bug
+    /// reports.
+    Done(Vec<String>),
 }
 
 pub struct Worker {
@@ -107,7 +109,15 @@ impl Worker {
         self.send(Msg::Devices(infos, errors, unknown));
     }
 
+    /// Runs one request, recording the device traffic it causes.
     pub async fn handle(&mut self, req: Req) {
+        periphery_core::hid::traffic::start();
+        self.run(req).await;
+        let traffic = periphery_core::hid::traffic::stop();
+        self.send(Msg::Done(traffic));
+    }
+
+    async fn run(&mut self, req: Req) {
         match req {
             Req::Discover => self.discover(None).await,
             Req::Request(any) => self.discover(Some(any)).await,
@@ -140,7 +150,7 @@ impl Worker {
                 self.snapshot(i).await;
             }
             Req::Backup(i, target) => {
-                let Some(d) = self.devices.get_mut(i) else { self.send(Msg::Done); return };
+                let Some(d) = self.devices.get_mut(i) else { return };
                 let msg = match Backup::capture(d.as_mut()).await {
                     Ok(b) => Msg::BackupReady(target, b.to_json()),
                     Err(e) => Msg::Error(format!("Backup failed: {e:#}")),
@@ -148,7 +158,7 @@ impl Worker {
                 self.send(msg);
             }
             Req::Restore { device: i, source, json, dry_run } => {
-                let Some(d) = self.devices.get_mut(i) else { self.send(Msg::Done); return };
+                let Some(d) = self.devices.get_mut(i) else { return };
                 let result = match Backup::from_json(&json) {
                     Ok(b) => backup::restore(d.as_mut(), &b, dry_run).await,
                     Err(e) => Err(e),
@@ -185,7 +195,6 @@ impl Worker {
                 }
             }
         }
-        self.send(Msg::Done);
     }
 
     /// Refreshes the selected device when it reports on-device changes. Call

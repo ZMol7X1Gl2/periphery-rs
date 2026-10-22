@@ -45,13 +45,15 @@ pub fn new_issue_url(d: &UnknownDevice, platform: &str) -> String {
     )
 }
 
-/// Longest error text put in a bug report; GitHub refuses very long URLs.
+/// Longest error and details text put in a bug report; GitHub refuses very
+/// long URLs.
 const MAX_ERROR: usize = 1500;
+const MAX_DETAILS: usize = 2500;
 
 /// New-issue page for `.github/ISSUE_TEMPLATE/bug-report.yml` about `error`.
 /// `device` names the device involved, if any; `details` is what Periphery
 /// knows about it.
-pub fn bug_report_url(device: Option<&str>, error: &str, details: &str, platform: &str) -> String {
+pub fn bug_report_url(device: Option<&str>, error: &str, details_in: &str, platform: &str) -> String {
     let error: String = error.chars().take(MAX_ERROR).collect();
     let first_line = error.lines().next().unwrap_or_default();
     let summary: String = first_line.chars().take(80).collect();
@@ -59,6 +61,10 @@ pub fn bug_report_url(device: Option<&str>, error: &str, details: &str, platform
         Some(d) => format!("{d}: {summary}"),
         None => summary,
     };
+    let mut details: String = details_in.chars().take(MAX_DETAILS).collect();
+    if details_in.chars().count() > MAX_DETAILS {
+        details.push_str("…\n");
+    }
     let details = format!("{details}Periphery: {} ({platform})\n", env!("CARGO_PKG_VERSION"));
     format!(
         "{REPO_URL}/issues/new?template=bug-report.yml&title={}&device={}&error={}&details={}",

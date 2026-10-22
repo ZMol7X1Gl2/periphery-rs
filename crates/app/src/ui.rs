@@ -12,6 +12,7 @@ use periphery_core::{DeviceInfo, DeviceKind, KeyPair, KeyPairList, KeyProperty, 
 
 use crate::mouse::{self, MouseState, MouseTab};
 use crate::platform::{self, ReqSender};
+use crate::report::{Activity, DeviceFacts, ReportWindow};
 use crate::request::{self, Existing};
 use crate::theme::{self, Semibold, icon, radius, size};
 use crate::worker::{Msg, Req};
@@ -93,6 +94,9 @@ pub struct App {
     want_km: Option<String>,
     want_mouse_tab: Option<MouseTab>,
     test_devices: bool,
+    /// Recent actions and their results, for "Report an issue".
+    activity: Activity,
+    report: Option<ReportWindow>,
 }
 
 /// A made-up device no driver handles, for `--test-devices`.
@@ -160,15 +164,100 @@ impl App {
             want_km: start.km,
             want_mouse_tab: start.mouse_tab,
             test_devices: start.test_devices,
+            activity: Activity::default(),
+            report: None,
         };
         app.send(Req::Discover);
         app
     }
 
     fn send(&mut self, r: Req) {
+        self.send_as(r, false);
+    }
+
+    /// Sends a request the app makes by itself (a timed refresh). It shows
+    /// in "Report an issue" only when it fails.
+    fn send_quiet(&mut self, r: Req) {
+        self.send_as(r, true);
+    }
+
+    fn send_as(&mut self, r: Req, quiet: bool) {
+        let (action, device) = self.describe(&r);
+        self.activity.begin(action, device, quiet);
         self.busy += 1;
         self.last_refresh = Instant::now();
         (self.tx)(r);
+    }
+
+    fn device_label(&self, i: usize) -> Option<String> {
+        self.devices.get(i).map(|d| format!("{} ({:04x}:{:04x})", d.title(), d.vid, d.pid))
+    }
+
+    /// The request in the user's words, and the device it is about.
+    fn describe(&self, r: &Req) -> (String, Option<String>) {
+        let setting = |id: &str, v: &Value| match self.snap.as_ref().and_then(|s| s.find(id)) {
+            Some(s) if matches!(v, Value::Unit) => s.label.trim().to_string(),
+            Some(s) => format!("Set {} to {}", s.label.trim(), fmt_value(&s.kind, v)),
+            None => format!("Set {id}"),
+        };
+        let selected = self.selected.and_then(|i| self.device_label(i));
+        match r {
+            Req::Discover => ("Scan for devices".into(), None),
+            Req::Request(false) => ("Connect a device".into(), None),
+            Req::Request(true) => ("Connect another device".into(), None),
+            Req::Select(i) => ("Open the device".into(), self.device_label(*i)),
+            Req::Refresh => ("Read the device".into(), selected),
+            Req::Apply(i, changes) => {
+                let parts: Vec<String> = changes.iter().map(|(id, v)| setting(id, v)).collect();
+                (parts.join(", "), self.device_label(*i))
+            }
+            Req::SetKey(i, layer, row, col, code) => {
+                (format!("Set the key at row {row}, col {col} on layer {layer} to {code:#06x}"), self.device_label(*i))
+            }
+            Req::SetKeyProperty(i, id, keys, value) => {
+                let label = self.snap.as_ref().and_then(|s| s.keymap.as_ref()).and_then(|k| k.properties.iter().find(|p| p.id == *id));
+                let name = label.map_or(id.clone(), |p| p.label.clone());
+                let what = match (value, label) {
+                    (Some(v), Some(p)) => format!("Set {name} to {} on {} key(s)", fmt_value(&p.kind, v), keys.len()),
+                    (Some(_), None) => format!("Set {name} on {} key(s)", keys.len()),
+                    (None, _) => format!("Reset {name} on {} key(s)", keys.len()),
+                };
+                (what, self.device_label(*i))
+            }
+            Req::SetPairs(i, id, pairs) => (format!("Set {id} to {} pair(s)", pairs.len()), self.device_label(*i)),
+            Req::Backup(i, _) => ("Back up".into(), self.device_label(*i)),
+            Req::Restore { device, source, dry_run, .. } => {
+                let verb = if *dry_run { "Check backup" } else { "Restore backup" };
+                (format!("{verb} {source}"), self.device_label(*device))
+            }
+        }
+    }
+
+    /// "Report an issue", floating in the bottom right corner above
+    /// everything else.
+    fn report_button(&mut self, ctx: &egui::Context) {
+        egui::Area::new(egui::Id::new("report-issue"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::RIGHT_BOTTOM, [-16.0, -16.0])
+            .show(ctx, |ui| {
+                let (fill, on) = theme::accent(ui.visuals());
+                let button = egui::Button::new(RichText::new(format!("{}  Report an issue", icon::BUG)).color(on).semibold())
+                    .fill(fill)
+                    .rounding(theme::radius::LG)
+                    .min_size(egui::vec2(0.0, 36.0));
+                let shadow = ui.visuals().popup_shadow;
+                let resp = egui::Frame::none().shadow(shadow).rounding(theme::radius::LG).show(ui, |ui| ui.add(button)).inner;
+                if resp.on_hover_text("Pick recent actions that went wrong and open a prefilled GitHub issue").clicked() {
+                    self.report = Some(ReportWindow::open(&self.activity, self.error.as_deref()));
+                }
+            });
+    }
+
+    /// The selected device and what it reports (connection, firmware…).
+    fn device_facts(&self) -> Option<DeviceFacts> {
+        let d = self.selected.and_then(|i| self.devices.get(i))?;
+        let status = self.snap.as_ref().map(|s| s.status.clone()).unwrap_or_default();
+        Some(DeviceFacts { title: d.title(), id: format!("{:04x}:{:04x}", d.vid, d.pid), status })
     }
 
     fn select(&mut self, i: usize) {
@@ -198,6 +287,9 @@ impl App {
                     if self.test_devices {
                         unknown.push(test_unknown());
                         errors.push(TEST_ERROR.into());
+                    }
+                    for e in &errors {
+                        self.activity.error(e);
                     }
                     self.unknown = unknown;
                     self.devices = list;
@@ -231,7 +323,10 @@ impl App {
                         self.snap = Some(*s);
                     }
                 }
-                Msg::Error(e) => self.error = Some(e),
+                Msg::Error(e) => {
+                    self.activity.error(&e);
+                    self.error = Some(e);
+                }
                 Msg::Info(i) => self.info = Some(i),
                 Msg::BackupReady(target, json) => match platform::save_backup(&target, &json) {
                     Ok(info) => self.info = Some(info),
@@ -247,7 +342,10 @@ impl App {
                     // A failed lookup still lets the user open the form.
                     self.lookups.insert(id, Lookup::Done(result.ok().flatten()));
                 }
-                Msg::Done => self.busy = self.busy.saturating_sub(1),
+                Msg::Done(traffic) => {
+                    self.busy = self.busy.saturating_sub(1);
+                    self.activity.finish(traffic);
+                }
             }
         }
     }
@@ -318,7 +416,7 @@ impl eframe::App for App {
             REFRESH_IDLE
         };
         if self.selected.is_some() && self.busy == 0 && !interacting && self.last_refresh.elapsed() >= interval {
-            self.send(Req::Refresh);
+            self.send_quiet(Req::Refresh);
         }
         ctx.request_repaint_after(Duration::from_millis(500));
 
@@ -358,12 +456,16 @@ impl eframe::App for App {
             if ui.add(egui::Button::new(format!("{}  Rescan", icon::ARROWS_CLOCKWISE)).min_size(full)).clicked() {
                 self.send(Req::Discover);
             }
+            let mut report = None;
             for e in &self.discover_errors {
                 ui.label(RichText::new(e).small().color(theme::DANGER));
-                let report = request::bug_report_url(None, e, "While scanning for devices\n", &platform::name());
-                ui.hyperlink_to(RichText::new(format!("Report a bug {}", icon::ARROW_SQUARE_OUT)).small(), report)
-                    .on_hover_text("Opens a prefilled GitHub issue; you can edit it before submitting");
+                if ui.add(egui::Button::new(RichText::new(format!("{}  Report a bug", icon::BUG)).small()).frame(false)).on_hover_text("Pick what went wrong and open a prefilled GitHub issue").clicked() {
+                    report = Some(e.clone());
+                }
                 ui.add_space(4.0);
+            }
+            if let Some(e) = report {
+                self.report = Some(ReportWindow::open(&self.activity, Some(&e)));
             }
             self.unknown_list(ui);
         });
@@ -375,6 +477,13 @@ impl eframe::App for App {
 
         self.confirm_window(ctx);
         self.restore_window(ctx);
+        self.report_button(ctx);
+        let facts = self.device_facts();
+        if let Some(w) = &mut self.report
+            && !w.show(ctx, &self.activity, facts.as_ref())
+        {
+            self.report = None;
+        }
 
         let central = egui::Frame::none().fill(ctx.style().visuals.panel_fill).inner_margin(egui::Margin { left: 20.0, right: 16.0, top: 4.0, bottom: 8.0 });
         egui::CentralPanel::default().frame(central).show(ctx, |ui| {
@@ -430,7 +539,7 @@ impl App {
                         self.send(Req::Backup(dev.unwrap(), target));
                     }
                 }
-                if ui.add(egui::Button::new(icon::ARROWS_CLOCKWISE)).on_hover_text("Read the device again").clicked() {
+                if ui.add_enabled(dev.is_some(), egui::Button::new(icon::ARROWS_CLOCKWISE)).on_hover_text("Read the device again").clicked() {
                     self.send(Req::Refresh);
                 }
             });
@@ -446,31 +555,18 @@ impl App {
         }
         if let Some(i) = self.info.clone() {
             ui.add_space(6.0);
-            if theme::banner(ui, theme::GOOD, &format!("{}  {i}", icon::CHECK_CIRCLE), true, None) {
+            if theme::banner(ui, theme::GOOD, &format!("{}  {i}", icon::CHECK_CIRCLE), true, None).is_some() {
                 self.info = None;
             }
         }
         if let Some(e) = self.error.clone() {
             ui.add_space(6.0);
-            let report = self.bug_report_url(&e);
-            if theme::banner(ui, theme::DANGER, &format!("{}  {e}", icon::WARNING_CIRCLE), true, Some(("Report a bug", &report))) {
-                self.error = None;
+            match theme::banner(ui, theme::DANGER, &format!("{}  {e}", icon::WARNING_CIRCLE), true, Some("Report a bug")) {
+                Some(theme::BannerClick::Close) => self.error = None,
+                Some(theme::BannerClick::Action) => self.report = Some(ReportWindow::open(&self.activity, Some(&e))),
+                None => {}
             }
         }
-    }
-
-    /// A prefilled bug report about `error`, naming the selected device and
-    /// what it reported (connection, firmware…).
-    fn bug_report_url(&self, error: &str) -> String {
-        let device = self.selected.and_then(|i| self.devices.get(i));
-        let mut details = String::new();
-        if let Some(d) = device {
-            details.push_str(&format!("Device: {} ({:04x}:{:04x})\n", d.title(), d.vid, d.pid));
-        }
-        for (k, v) in self.snap.iter().flat_map(|s| &s.status) {
-            details.push_str(&format!("{k}: {v}\n"));
-        }
-        request::bug_report_url(device.map(|d| d.title()).as_deref(), error, &details, &platform::name())
     }
 
     /// Devices no driver handles, each with a way to ask for support.
