@@ -6,6 +6,11 @@
   <title>Periphery</title>
   <meta name="description" content="Configure mice and keyboards from different brands in your browser.">
   <link data-trunk rel="rust" data-bin="periphery-web" data-wasm-opt="z">
+  <!-- The logo (docs/assets/logo.svg), with PNGs rendered from it for browsers without SVG icons and for iOS. -->
+  <link data-trunk rel="icon" type="image/svg+xml" href="../../docs/assets/logo.svg">
+  <link data-trunk rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+  <link data-trunk rel="copy-file" href="assets/apple-touch-icon.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <style>
     /* Match the app's panel colour (crates/app/src/theme.rs) so loading doesn't flash. */
     html, body { margin: 0; height: 100%; overflow: hidden; background: #111113; color: #c8c6c0; }

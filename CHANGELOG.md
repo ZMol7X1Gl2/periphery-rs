@@ -68,7 +68,8 @@ release workflow turns Unreleased into the new version.
   emoji that looked different on every system. Selected choices keep
   rounded corners.
 - Periphery has a logo: a tile with a P and two pairs of stars. It's in the
-  sidebar, and it's the desktop app's window and taskbar icon.
+  sidebar, the desktop app's window and taskbar icon, and the web app's
+  browser tab and iOS home-screen icon.
 - The colours follow the logo: black and off-white mark whatever is
   chosen (tabs, options, switches, the selected device and mouse button),
   the greys are warm instead of blue, and colour is kept for status:
