@@ -1,5 +1,6 @@
-//! "Request support" for devices no driver handles: a prefilled GitHub issue
-//! (the user reviews and submits it) and a lookup for an existing request.
+//! Prefilled GitHub issues the user reviews and submits: "Request support"
+//! for devices no driver handles (with a lookup for an existing request),
+//! and "Report a bug" for errors.
 
 use anyhow::{Context, Result};
 use periphery_core::unknown::UnknownDevice;
@@ -40,6 +41,30 @@ pub fn new_issue_url(d: &UnknownDevice, platform: &str) -> String {
         encode(&title),
         encode(&d.name()),
         encode(&d.id()),
+        encode(&details),
+    )
+}
+
+/// Longest error text put in a bug report; GitHub refuses very long URLs.
+const MAX_ERROR: usize = 1500;
+
+/// New-issue page for `.github/ISSUE_TEMPLATE/bug-report.yml` about `error`.
+/// `device` names the device involved, if any; `details` is what Periphery
+/// knows about it.
+pub fn bug_report_url(device: Option<&str>, error: &str, details: &str, platform: &str) -> String {
+    let error: String = error.chars().take(MAX_ERROR).collect();
+    let first_line = error.lines().next().unwrap_or_default();
+    let summary: String = first_line.chars().take(80).collect();
+    let title = match device {
+        Some(d) => format!("{d}: {summary}"),
+        None => summary,
+    };
+    let details = format!("{details}Periphery: {} ({platform})\n", env!("CARGO_PKG_VERSION"));
+    format!(
+        "{REPO_URL}/issues/new?template=bug-report.yml&title={}&device={}&error={}&details={}",
+        encode(&title),
+        encode(device.unwrap_or_default()),
+        encode(&error),
         encode(&details),
     )
 }
@@ -89,6 +114,21 @@ mod tests {
         assert!(url.contains("&ids=1e7d%3A2e2c&"));
         assert!(url.contains("ff00%3A0001"));
         assert!(!url.contains(' ') && !url.contains('\n'));
+    }
+
+    #[test]
+    fn bug_report_is_prefilled() {
+        let url = bug_report_url(Some("Keychron Q1"), "no reply to command 0x01", "Device: Keychron Q1 (3434:0110)\n", "desktop, macos");
+        assert!(url.starts_with("https://github.com/ZMol7X1Gl2/periphery-rs/issues/new?template=bug-report.yml&title=Keychron%20Q1%3A%20no%20reply"));
+        assert!(url.contains("&device=Keychron%20Q1&"));
+        assert!(url.contains("3434%3A0110"));
+        assert!(url.contains("desktop%2C%20macos"));
+        assert!(!url.contains(' ') && !url.contains('\n'));
+
+        let long = "x".repeat(5000);
+        let url = bug_report_url(None, &long, "", "web");
+        assert!(url.contains("&device=&"));
+        assert!(url.len() < 3000);
     }
 
     #[test]

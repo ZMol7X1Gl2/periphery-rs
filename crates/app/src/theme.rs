@@ -271,9 +271,10 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, current: &mut T, items: &[(T,
     changed
 }
 
-/// A coloured banner for notices, errors and confirmations. Returns true
-/// when its close button was clicked.
-pub fn banner(ui: &mut Ui, color: Color32, text: &str, closable: bool) -> bool {
+/// A coloured banner for notices, errors and confirmations, with an optional
+/// link (label, URL) at its end. Returns true when its close button was
+/// clicked.
+pub fn banner(ui: &mut Ui, color: Color32, text: &str, closable: bool, link: Option<(&str, &str)>) -> bool {
     let mut close = false;
     egui::Frame::none()
         .fill(color.gamma_multiply(0.16))
@@ -283,9 +284,14 @@ pub fn banner(ui: &mut Ui, color: Color32, text: &str, closable: bool) -> bool {
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(text).color(color));
-                if closable {
+                if closable || link.is_some() {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        close = ui.add(egui::Button::new(icon::X).frame(false).small()).clicked();
+                        if closable {
+                            close = ui.add(egui::Button::new(icon::X).frame(false).small()).clicked();
+                        }
+                        if let Some((label, url)) = link {
+                            ui.hyperlink_to(RichText::new(format!("{label} {}", icon::ARROW_SQUARE_OUT)).color(color).semibold(), url);
+                        }
                     });
                 }
             });

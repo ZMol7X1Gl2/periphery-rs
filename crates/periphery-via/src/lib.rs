@@ -2,7 +2,7 @@
 //! extensions when present. Protocol code lives in the `qmk-via` crate.
 
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use periphery_core::hid::{Api, DeviceInfo as HidInfo, Filter};
 use periphery_core::{
     Device, DeviceInfo, DeviceKind, Driver, Group, KeyPair, KeyPairList, KeyProperty, Keymap, Kind,
@@ -33,7 +33,8 @@ impl Driver for ViaDriver {
     async fn discover(&self, api: &Api) -> Vec<Result<Box<dyn Device>>> {
         let mut out = Vec::new();
         for d in api.devices().filter(|d| FILTER.matches(d)) {
-            out.push(ViaKeyboard::open(api, d).await.map(|k| Box::new(k) as Box<dyn Device>));
+            let name = format!("{} ({:04x}:{:04x})", d.product.trim(), d.vendor_id, d.product_id);
+            out.push(ViaKeyboard::open(api, d).await.map(|k| Box::new(k) as Box<dyn Device>).context(name));
         }
         out
     }

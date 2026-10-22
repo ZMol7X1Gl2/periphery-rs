@@ -30,7 +30,8 @@ async fn run() -> Result<()> {
     }
     let (mut devices, errors) = discover_all(&api, &periphery::drivers()).await;
     for e in &errors {
-        eprintln!("warning: {e}");
+        let report = request::bug_report_url(None, e, "While scanning for devices\n", &format!("cli, {}", std::env::consts::OS));
+        eprintln!("warning: {e}\n  report a bug: {report}");
     }
     let pick = |devices: &mut Vec<Box<dyn Device>>, s: Option<&String>| -> Result<usize> {
         let i: usize = s.context("missing device number")?.parse()?;

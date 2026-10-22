@@ -1,0 +1,47 @@
+name: Bug report
+description: A device that Periphery supports doesn't work, or shows an error
+title: "<device>: <what went wrong>"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! Periphery's **Report a bug** link fills most of this in.
+        Before submitting, search the [open bugs](https://github.com/ZMol7X1Gl2/periphery-rs/issues?q=is%3Aissue+is%3Aopen+label%3Abug) and add details there instead if yours is already reported.
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: Brand and model. Leave empty if the error isn't about one device.
+      placeholder: Keychron Q1 HE
+  - type: textarea
+    id: error
+    attributes:
+      label: What happened
+      description: The error Periphery showed, and anything else you noticed
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you were doing
+      description: The steps that lead to the error, so it can be reproduced
+      placeholder: |
+        1. Plugged in the keyboard over USB
+        2. Opened Periphery
+        3. The keyboard isn't listed and the sidebar shows the error above
+  - type: dropdown
+    id: connection
+    attributes:
+      label: How the device connects
+      multiple: true
+      options:
+        - USB cable
+        - 2.4 GHz receiver
+        - Bluetooth
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Filled in by Periphery; no serial numbers or personal data.
+      render: text

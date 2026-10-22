@@ -16,6 +16,12 @@ release workflow turns Unreleased into the new version.
   yet", with a **Request support** button that checks for an existing
   request and opens a prefilled GitHub issue you can review before sending.
   `periphery-cli list` prints the same links.
+- **Report a bug** next to errors: under a device that failed to open in
+  the sidebar, and in the error banner. It opens a prefilled GitHub issue
+  with the error, the device and its USB id, firmware and connection, and
+  the Periphery version, which you review before sending.
+  `periphery-cli` prints the same link with each warning. Keyboard errors
+  now name the keyboard and its USB id.
 - Web app: **Connect another device…** lets you pick any device, so you can
   request support for it.
 - Logitech: lighting for mice with LEDs such as the PRO 2 LIGHTSPEED. Choose

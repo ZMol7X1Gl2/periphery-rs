@@ -334,6 +334,10 @@ impl eframe::App for App {
             }
             for e in &self.discover_errors {
                 ui.label(RichText::new(e).small().color(theme::DANGER));
+                let report = request::bug_report_url(None, e, "While scanning for devices\n", &platform::name());
+                ui.hyperlink_to(RichText::new(format!("Report a bug {}", icon::ARROW_SQUARE_OUT)).small(), report)
+                    .on_hover_text("Opens a prefilled GitHub issue; you can edit it before submitting");
+                ui.add_space(4.0);
             }
             self.unknown_list(ui);
         });
@@ -358,7 +362,7 @@ impl eframe::App for App {
                 return;
             };
             if let Some(n) = &snap.notice {
-                theme::banner(ui, theme::WARN, n, false);
+                theme::banner(ui, theme::WARN, n, false, None);
                 ui.add_space(8.0);
             }
             let is_mouse = self.selected.and_then(|i| self.devices.get(i)).is_some_and(|d| d.kind == DeviceKind::Mouse);
@@ -416,16 +420,31 @@ impl App {
         }
         if let Some(i) = self.info.clone() {
             ui.add_space(6.0);
-            if theme::banner(ui, theme::GOOD, &format!("{}  {i}", icon::CHECK_CIRCLE), true) {
+            if theme::banner(ui, theme::GOOD, &format!("{}  {i}", icon::CHECK_CIRCLE), true, None) {
                 self.info = None;
             }
         }
         if let Some(e) = self.error.clone() {
             ui.add_space(6.0);
-            if theme::banner(ui, theme::DANGER, &format!("{}  {e}", icon::WARNING_CIRCLE), true) {
+            let report = self.bug_report_url(&e);
+            if theme::banner(ui, theme::DANGER, &format!("{}  {e}", icon::WARNING_CIRCLE), true, Some(("Report a bug", &report))) {
                 self.error = None;
             }
         }
+    }
+
+    /// A prefilled bug report about `error`, naming the selected device and
+    /// what it reported (connection, firmware…).
+    fn bug_report_url(&self, error: &str) -> String {
+        let device = self.selected.and_then(|i| self.devices.get(i));
+        let mut details = String::new();
+        if let Some(d) = device {
+            details.push_str(&format!("Device: {} ({:04x}:{:04x})\n", d.title(), d.vid, d.pid));
+        }
+        for (k, v) in self.snap.iter().flat_map(|s| &s.status) {
+            details.push_str(&format!("{k}: {v}\n"));
+        }
+        request::bug_report_url(device.map(|d| d.title()).as_deref(), error, &details, &platform::name())
     }
 
     /// Devices no driver handles, each with a way to ask for support.
