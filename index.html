@@ -7,8 +7,8 @@
   <meta name="description" content="Configure mice and keyboards from different brands in your browser.">
   
 <script type="module">
-import init, * as bindings from '/periphery-rs/periphery-web-fa770da6a3f8f3d2.js';
-const wasm = await init({ module_or_path: '/periphery-rs/periphery-web-fa770da6a3f8f3d2_bg.wasm' });
+import init, * as bindings from '/periphery-rs/periphery-web-f34da7079c228027.js';
+const wasm = await init({ module_or_path: '/periphery-rs/periphery-web-f34da7079c228027_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -17,6 +17,11 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>
+  <!-- The logo (docs/assets/logo.svg), with PNGs rendered from it for browsers without SVG icons and for iOS. -->
+  <link rel="icon" href="/periphery-rs/logo-237716886bf57953.svg" integrity="sha384-U6vKnVEclvLJjURcn5eSAT2tEfJY1/EZivITBW9Iq1FV2COgK7RJiRWHg/Fm4+X8"/>
+  <link rel="icon" href="/periphery-rs/favicon-32-e73dc71df9bbc730.png" integrity="sha384-w/g9yQHutcYAEXGDZeCLZ7f0742jZHLGy/K9iT8W3LiLvq2BCSkwHKuraaK/YPUu"/>
+  
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <style>
     /* Match the app's panel colour (crates/app/src/theme.rs) so loading doesn't flash. */
     html, body { margin: 0; height: 100%; overflow: hidden; background: #111113; color: #c8c6c0; }
@@ -25,7 +30,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
       font: 16px system-ui, sans-serif; padding: 16px; text-align: center; }
   </style>
-<link rel="modulepreload" href="/periphery-rs/periphery-web-fa770da6a3f8f3d2.js" crossorigin="anonymous" integrity="sha384-KBscFjSsHETcl6O6mDbbJrge6Q4Qd7No9pPXTbLJKHF2iLA9Twlg7PXtqCmFPRPt"><link rel="preload" href="/periphery-rs/periphery-web-fa770da6a3f8f3d2_bg.wasm" crossorigin="anonymous" integrity="sha384-335tD87wnRSPz/kzPajzTDlFVJHdr6q0Z1l4sGa/AW+W2oX5VMQMDdNcCu+fFI6B" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/periphery-rs/periphery-web-f34da7079c228027.js" crossorigin="anonymous" integrity="sha384-pszZscXkW5RS3j+6dMkdCUub2zFwLm7Nomj1ZNHhWvFWsSbNgQTbIBSNWxV0sGOr"><link rel="preload" href="/periphery-rs/periphery-web-f34da7079c228027_bg.wasm" crossorigin="anonymous" integrity="sha384-cSPzCRBUVhJG7R1q9v6EFt0eKN3b/CAf/kaYIkYNiRVU/CGa5krTtappyD28WLAv" as="fetch" type="application/wasm"></head>
 <body>
   <canvas id="periphery"></canvas>
   <div id="loading">Loading Periphery…</div>
