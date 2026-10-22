@@ -56,6 +56,10 @@ release workflow turns Unreleased into the new version.
   rounded corners.
 - Periphery has a logo: a tile with a P and two pairs of stars. It's in the
   sidebar, and it's the desktop app's window and taskbar icon.
+- The colours follow the logo: black and off-white mark whatever is
+  chosen (tabs, options, switches, the selected device and mouse button),
+  the greys are warm instead of blue, and colour is kept for status:
+  green, amber and red.
 
 ## [0.3.0-rc.2] - 2026-10-15
 

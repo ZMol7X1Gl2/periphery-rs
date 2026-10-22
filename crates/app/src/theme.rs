@@ -1,14 +1,16 @@
-//! Periphery's look: a dark palette with one accent colour, the Inter
-//! typeface with Phosphor icons, fixed type and corner scales, and a few
-//! shared widgets (cards, chips, segmented tabs).
+//! Periphery's look: the logo's black and off-white, warm neutral greys,
+//! colour only for status, the Inter typeface with Phosphor icons, fixed type
+//! and corner scales, and a few shared widgets (cards, chips, tabs).
 
 use eframe::egui::{self, Color32, FontData, FontDefinitions, FontFamily, FontId, Margin, Response, RichText, Rounding, Stroke, TextStyle, Theme, Ui, Visuals};
 
 /// Icons, drawn from the Phosphor font: `theme::icon::MOUSE`.
 pub use egui_phosphor::regular as icon;
 
-pub const ACCENT: Color32 = Color32::from_rgb(98, 112, 245);
-const ACCENT_TEXT: Color32 = Color32::from_rgb(240, 242, 255);
+/// The logo's black and off-white. The accent is whichever of the two
+/// contrasts with the theme: off-white on dark, black on light.
+const INK: Color32 = Color32::from_rgb(11, 11, 12);
+const PAPER: Color32 = Color32::from_rgb(239, 236, 230);
 pub const WARN: Color32 = Color32::from_rgb(230, 170, 60);
 pub const GOOD: Color32 = Color32::from_rgb(80, 190, 120);
 /// Errors and actions that can't be undone.
@@ -56,6 +58,14 @@ impl Semibold for RichText {
     fn semibold(self) -> Self {
         self.family(semibold()).strong()
     }
+}
+
+/// What marks the chosen option (tabs, choices, switches, the selected
+/// device): the accent fill and the colour of text on it. egui's own
+/// selection colour stays a muted grey, because egui also paints it behind
+/// selected text.
+pub fn accent(v: &Visuals) -> (Color32, Color32) {
+    if v.dark_mode { (PAPER, INK) } else { (INK, PAPER) }
 }
 
 fn rgb(hex: u32) -> Color32 {
@@ -110,9 +120,9 @@ fn shape(v: &mut Visuals) {
     }
     v.window_rounding = Rounding::same(radius::LG);
     v.menu_rounding = r;
-    v.selection.bg_fill = ACCENT;
-    v.selection.stroke = Stroke::new(1.0_f32, ACCENT_TEXT);
-    v.hyperlink_color = ACCENT;
+    let (accent, _) = accent(v);
+    v.hyperlink_color = accent;
+    v.widgets.active.bg_stroke = Stroke::new(1.0_f32, accent);
     v.slider_trailing_fill = true;
     v.window_shadow.blur = 24.0;
     v.popup_shadow.blur = 12.0;
@@ -120,30 +130,31 @@ fn shape(v: &mut Visuals) {
 
 fn dark() -> Visuals {
     let mut v = Visuals::dark();
-    v.panel_fill = rgb(0x16181d);
-    v.window_fill = rgb(0x1d2027);
-    v.faint_bg_color = rgb(0x1d2027);
-    v.extreme_bg_color = rgb(0x101216);
-    v.code_bg_color = rgb(0x101216);
+    v.panel_fill = rgb(0x111113);
+    v.window_fill = rgb(0x18181b);
+    v.faint_bg_color = rgb(0x18181b);
+    v.extreme_bg_color = rgb(0x0b0b0c);
+    v.code_bg_color = rgb(0x0b0b0c);
     v.override_text_color = None;
+    v.selection.bg_fill = rgb(0x5e5d63);
+    v.selection.stroke = Stroke::new(1.0_f32, PAPER);
 
     let w = &mut v.widgets;
-    w.noninteractive.bg_fill = rgb(0x1d2027);
-    w.noninteractive.weak_bg_fill = rgb(0x1d2027);
-    w.noninteractive.bg_stroke = Stroke::new(1.0_f32, rgb(0x2a2e37));
-    w.noninteractive.fg_stroke = Stroke::new(1.0_f32, rgb(0xc9ccd6));
-    w.inactive.bg_fill = rgb(0x2a2e38);
-    w.inactive.weak_bg_fill = rgb(0x272b34);
+    w.noninteractive.bg_fill = rgb(0x18181b);
+    w.noninteractive.weak_bg_fill = rgb(0x18181b);
+    w.noninteractive.bg_stroke = Stroke::new(1.0_f32, rgb(0x28282c));
+    w.noninteractive.fg_stroke = Stroke::new(1.0_f32, rgb(0xc8c6c0));
+    w.inactive.bg_fill = rgb(0x262629);
+    w.inactive.weak_bg_fill = rgb(0x232326);
     w.inactive.bg_stroke = Stroke::NONE;
-    w.inactive.fg_stroke = Stroke::new(1.0_f32, rgb(0xe3e5ec));
-    w.hovered.bg_fill = rgb(0x343946);
-    w.hovered.weak_bg_fill = rgb(0x323743);
-    w.hovered.bg_stroke = Stroke::new(1.0_f32, rgb(0x454b5a));
-    w.hovered.fg_stroke = Stroke::new(1.5_f32, rgb(0xf2f3f7));
-    w.active.bg_fill = rgb(0x3c4252);
-    w.active.weak_bg_fill = rgb(0x3c4252);
-    w.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
-    w.active.fg_stroke = Stroke::new(2.0_f32, rgb(0xffffff));
+    w.inactive.fg_stroke = Stroke::new(1.0_f32, rgb(0xe6e4de));
+    w.hovered.bg_fill = rgb(0x303034);
+    w.hovered.weak_bg_fill = rgb(0x2d2d31);
+    w.hovered.bg_stroke = Stroke::new(1.0_f32, rgb(0x424147));
+    w.hovered.fg_stroke = Stroke::new(1.5_f32, rgb(0xf5f3ee));
+    w.active.bg_fill = rgb(0x38383d);
+    w.active.weak_bg_fill = rgb(0x38383d);
+    w.active.fg_stroke = Stroke::new(2.0_f32, PAPER);
     w.open = w.hovered;
     shape(&mut v);
     v
@@ -151,15 +162,18 @@ fn dark() -> Visuals {
 
 fn light() -> Visuals {
     let mut v = Visuals::light();
-    v.panel_fill = rgb(0xf4f5f8);
-    v.window_fill = rgb(0xffffff);
-    v.faint_bg_color = rgb(0xffffff);
-    v.extreme_bg_color = rgb(0xeceef3);
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, rgb(0xdfe2e9));
-    v.widgets.inactive.weak_bg_fill = rgb(0xe8eaf0);
-    v.widgets.inactive.bg_fill = rgb(0xe3e6ed);
+    v.panel_fill = rgb(0xf4f3ef);
+    v.window_fill = rgb(0xfdfcfa);
+    v.faint_bg_color = rgb(0xfdfcfa);
+    v.extreme_bg_color = rgb(0xeae8e2);
+    v.selection.bg_fill = rgb(0xbfbbb2);
+    v.selection.stroke = Stroke::new(1.0_f32, INK);
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, rgb(0xdedbd4));
+    v.widgets.inactive.weak_bg_fill = rgb(0xe7e4de);
+    v.widgets.inactive.bg_fill = rgb(0xe2dfd8);
     v.widgets.inactive.bg_stroke = Stroke::NONE;
-    v.widgets.hovered.weak_bg_fill = rgb(0xdde1ea);
+    v.widgets.hovered.weak_bg_fill = rgb(0xdcd9d2);
+    v.widgets.hovered.bg_fill = rgb(0xd8d5cd);
     shape(&mut v);
     v
 }
@@ -226,23 +240,27 @@ pub fn chip(ui: &mut Ui, key: &str, value: &str) -> Response {
 /// A button that shows whether it's the current choice. egui draws selected
 /// buttons square and outlined; this keeps the theme's corners and a plain
 /// accent fill.
-pub fn choice_button<'a>(text: impl Into<egui::WidgetText>, selected: bool) -> egui::Button<'a> {
-    let b = egui::Button::new(text).selected(selected).rounding(radius::MD);
-    if selected { b.stroke(Stroke::NONE) } else { b }
+pub fn choice_button<'a>(ui: &Ui, text: &str, selected: bool) -> egui::Button<'a> {
+    if !selected {
+        return egui::Button::new(text.to_string()).rounding(radius::MD);
+    }
+    let (fill, on) = accent(ui.visuals());
+    egui::Button::new(RichText::new(text).color(on)).selected(true).rounding(radius::MD).fill(fill).stroke(Stroke::NONE)
 }
 
 /// A row of pill tabs inside a track. Returns true when the selection changed.
 pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, current: &mut T, items: &[(T, String)]) -> bool {
     let mut changed = false;
     let track = ui.visuals().extreme_bg_color;
+    let (fill, on_fill) = accent(ui.visuals());
     egui::Frame::none().fill(track).rounding(radius::LG).inner_margin(Margin::same(3.0)).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             for (value, label) in items {
                 let on = *current == *value;
-                let text = if on { RichText::new(label).color(ACCENT_TEXT).semibold() } else { RichText::new(label) };
+                let text = if on { RichText::new(label).color(on_fill).semibold() } else { RichText::new(label) };
                 let mut b = egui::Button::new(text).rounding(radius::MD).min_size(egui::vec2(0.0, 30.0));
-                b = if on { b.fill(ACCENT) } else { b.fill(Color32::TRANSPARENT) };
+                b = if on { b.fill(fill) } else { b.fill(Color32::TRANSPARENT) };
                 if ui.add(b).clicked() && !on {
                     *current = *value;
                     changed = true;

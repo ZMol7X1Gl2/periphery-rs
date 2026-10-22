@@ -251,16 +251,17 @@ fn kind_name(k: DeviceKind) -> &'static str {
 fn device_row(ui: &mut Ui, d: &DeviceInfo, selected: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 50.0), egui::Sense::click());
     let v = ui.visuals().clone();
+    let (accent, _) = theme::accent(&v);
     let painter = ui.painter();
     if selected {
-        painter.rect_filled(rect, radius::MD, theme::ACCENT.gamma_multiply(0.22));
+        painter.rect_filled(rect, radius::MD, v.widgets.inactive.bg_fill);
         let bar = egui::Rect::from_min_size(rect.left_top() + egui::vec2(0.0, 12.0), egui::vec2(3.0, rect.height() - 24.0));
-        painter.rect_filled(bar, radius::SM, theme::ACCENT);
+        painter.rect_filled(bar, radius::SM, accent);
     } else if resp.hovered() {
         painter.rect_filled(rect, radius::MD, v.widgets.hovered.weak_bg_fill);
     }
     let text = v.text_color();
-    let icon_color = if selected { theme::ACCENT } else { v.weak_text_color() };
+    let icon_color = if selected { accent } else { v.weak_text_color() };
     painter.text(rect.left_center() + egui::vec2(22.0, 0.0), egui::Align2::CENTER_CENTER, kind_icon(d.kind), egui::FontId::proportional(20.0), icon_color);
     let x = rect.left() + 44.0;
     let width = rect.right() - x - 6.0;
@@ -668,12 +669,14 @@ pub(crate) fn toggle_switch(ui: &mut Ui, on: &mut bool) -> egui::Response {
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *on, ""));
     if ui.is_rect_visible(rect) {
         let t = ui.ctx().animate_bool_responsive(response.id, *on);
-        let visuals = ui.style().interact_selectable(&response, *on);
+        let visuals = ui.style().interact(&response);
+        let (accent, on_accent) = theme::accent(ui.visuals());
         let rect = rect.expand(visuals.expansion);
         let radius = 0.5 * rect.height();
-        ui.painter().rect(rect, radius, visuals.bg_fill, visuals.bg_stroke);
+        let (track, knob) = if *on { (accent, on_accent) } else { (visuals.bg_fill, visuals.fg_stroke.color) };
+        ui.painter().rect(rect, radius, track, visuals.bg_stroke);
         let x = egui::lerp((rect.left() + radius)..=(rect.right() - radius), t);
-        ui.painter().circle(egui::pos2(x, rect.center().y), 0.75 * radius, visuals.bg_fill, visuals.fg_stroke);
+        ui.painter().circle_filled(egui::pos2(x, rect.center().y), 0.7 * radius, knob);
     }
     response
 }
@@ -818,15 +821,17 @@ impl App {
                 rect.min + egui::vec2(k.x * unit + 2.0, k.y * unit + 2.0),
                 egui::vec2(k.w * unit - 4.0, k.h * unit - 4.0),
             );
-            let text = RichText::new(&label).size(if label.chars().count() > 5 { size::TINY } else { size::MONO });
+            let text_size = if label.chars().count() > 5 { size::TINY } else { size::MONO };
+            let text = RichText::new(&label).size(text_size);
             let mut button = egui::Button::new(text).wrap();
             if let Some(c) = fill {
                 button = button.fill(c);
             }
             if selected {
-                button = button.stroke(egui::Stroke::new(2.5_f32, ui.visuals().selection.stroke.color));
+                let (accent, on_accent) = theme::accent(ui.visuals());
+                button = button.stroke(egui::Stroke::new(2.5_f32, accent));
                 if fill.is_none() {
-                    button = button.fill(ui.visuals().selection.bg_fill);
+                    button = egui::Button::new(RichText::new(&label).size(text_size).color(on_accent)).wrap().fill(accent);
                 }
             }
             if ui.put(r, button).on_hover_text(format!("{keycap}  (row {} col {})", k.row, k.col)).clicked() {

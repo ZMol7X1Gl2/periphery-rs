@@ -330,7 +330,7 @@ fn button_editor(ui: &mut Ui, s: &mut Setting, picker: &mut ActionPicker, e: &mu
     egui::ScrollArea::vertical().id_salt("button-actions").max_height(320.0).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             for (o, l) in opts.iter().filter(|(_, l)| visible(l)) {
-                let button = theme::choice_button(l, *v == *o).min_size(egui::vec2(104.0, 30.0));
+                let button = theme::choice_button(ui, l, *v == *o).min_size(egui::vec2(104.0, 30.0));
                 if ui.add(button).clicked() && *v != *o {
                     *v = *o;
                     e.changes.push((s.id.clone(), Value::Int(*o)));
@@ -389,7 +389,7 @@ fn polling_rate(ui: &mut Ui, s: &mut Setting, e: &mut Edits) {
         (Kind::Choice(opts), Value::Int(v)) if opts.len() <= MAX_RATE_BUTTONS => {
             ui.horizontal_wrapped(|ui| {
                 for (o, l) in opts {
-                    let button = theme::choice_button(l, *v == *o).min_size(egui::vec2(72.0, 30.0));
+                    let button = theme::choice_button(ui, l, *v == *o).min_size(egui::vec2(72.0, 30.0));
                     if ui.add(button).clicked() && *v != *o {
                         *v = *o;
                         e.changes.push((s.id.clone(), Value::Int(*o)));

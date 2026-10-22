@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 use eframe::egui::{self, Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use periphery_core::ButtonPos;
 
-use crate::theme::{radius, size};
+use crate::theme::{self, radius, size};
 
 /// Half the body length in points.
 const R: f32 = 150.0;
@@ -185,19 +185,20 @@ pub fn show(ui: &mut Ui, buttons: &BTreeMap<ButtonPos, ButtonInfo>, selected: Op
     let screen = |pts: &[Pos2]| pts.iter().map(|p| to_screen(*p)).collect::<Vec<_>>();
 
     let v = ui.visuals().clone();
+    let (accent, on_accent) = theme::accent(&v);
     let outline = v.widgets.noninteractive.bg_stroke;
     let painter = ui.painter_at(rect);
     let hover = ui.input(|i| i.pointer.hover_pos());
     let fill = |pos: ButtonPos, hovered: bool| {
         if selected == Some(pos) {
-            v.selection.bg_fill
+            accent
         } else if hovered {
             v.widgets.hovered.weak_bg_fill
         } else {
             v.widgets.inactive.weak_bg_fill
         }
     };
-    let stroke = |pos: ButtonPos| if selected == Some(pos) { v.selection.stroke } else { outline };
+    let stroke = |pos: ButtonPos| if selected == Some(pos) { Stroke::new(1.0_f32, accent) } else { outline };
     let mut clicked = None;
 
     let shell = mix(v.panel_fill, v.widgets.inactive.weak_bg_fill, 0.45);
@@ -217,7 +218,7 @@ pub fn show(ui: &mut Ui, buttons: &BTreeMap<ButtonPos, ButtonInfo>, selected: Op
         let over = hover.is_some_and(|p| inside(&pts, p)) && resp.hovered();
         polygon(&painter, &pts, fill(pos, over), stroke(pos));
         let side = if pos == ButtonPos::Left { -1.0 } else { 1.0 };
-        let text_color = if selected == Some(pos) { v.selection.stroke.color } else { v.text_color() };
+        let text_color = if selected == Some(pos) { on_accent } else { v.text_color() };
         painter.text(to_screen(pos2(side * 0.28, -0.3)), Align2::CENTER_CENTER, shorten(&info.binding, 11), FontId::proportional(size::SMALL), text_color);
         if resp.clicked() && resp.interact_pointer_pos().is_some_and(|p| inside(&pts, p)) {
             clicked = Some(pos);
@@ -240,7 +241,7 @@ pub fn show(ui: &mut Ui, buttons: &BTreeMap<ButtonPos, ButtonInfo>, selected: Op
         let arrow = |dir: egui::Vec2| {
             let c = r.center();
             let (a, b) = (dir * 6.0, dir.rot90() * 5.0);
-            Shape::convex_polygon(vec![c + a, c - a + b, c - a - b], if selected == Some(pos) { v.selection.stroke.color } else { v.text_color() }, Stroke::NONE)
+            Shape::convex_polygon(vec![c + a, c - a + b, c - a - b], if selected == Some(pos) { on_accent } else { v.text_color() }, Stroke::NONE)
         };
         match pos {
             ButtonPos::WheelUp | ButtonPos::WheelDown | ButtonPos::TiltLeft | ButtonPos::TiltRight => {
