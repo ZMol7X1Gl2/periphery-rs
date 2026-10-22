@@ -10,6 +10,8 @@ release workflow turns Unreleased into the new version.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-22
+
 ### Added
 
 - Devices Periphery doesn't support yet are listed under "Not supported
@@ -157,7 +159,8 @@ release workflow turns Unreleased into the new version.
   Logitech HID++ 2.0 mice.
 - Backup and restore of every device to a JSON file.
 
-[Unreleased]: https://github.com/ZMol7X1Gl2/periphery-rs/compare/v0.3.0-rc.2...HEAD
+[Unreleased]: https://github.com/ZMol7X1Gl2/periphery-rs/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ZMol7X1Gl2/periphery-rs/compare/v0.3.0-rc.2...v0.3.0
 [0.3.0-rc.2]: https://github.com/ZMol7X1Gl2/periphery-rs/compare/v0.3.0-rc.1...v0.3.0-rc.2
 [0.3.0-rc.1]: https://github.com/ZMol7X1Gl2/periphery-rs/compare/v0.2.1...v0.3.0-rc.1
 [0.2.1]: https://github.com/ZMol7X1Gl2/periphery-rs/compare/v0.2.0...v0.2.1
