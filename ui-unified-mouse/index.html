@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Periphery</title>
+  <meta name="description" content="Configure mice and keyboards from different brands in your browser.">
+  
+<script type="module">
+import init, * as bindings from '/periphery-rs/ui-unified-mouse/periphery-web-6780f522f9628e2b.js';
+const wasm = await init({ module_or_path: '/periphery-rs/ui-unified-mouse/periphery-web-6780f522f9628e2b_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+  <style>
+    /* Match the app's panel colour (crates/app/src/theme.rs) so loading doesn't flash. */
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #111113; color: #c8c6c0; }
+    @media (prefers-color-scheme: light) { html, body { background: #f4f3ef; color: #3c3b38; } }
+    canvas { display: block; width: 100%; height: 100%; }
+    #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font: 16px system-ui, sans-serif; padding: 16px; text-align: center; }
+  </style>
+<link rel="modulepreload" href="/periphery-rs/ui-unified-mouse/periphery-web-6780f522f9628e2b.js" crossorigin="anonymous" integrity="sha384-U48FHgunnYoWTKVZ01T69sjuwbEP0gmBJcPEMi9ew9YDJlC5qmsUf5VqH2BsUn3h"><link rel="preload" href="/periphery-rs/ui-unified-mouse/periphery-web-6780f522f9628e2b_bg.wasm" crossorigin="anonymous" integrity="sha384-Ga8O/TqDNqv9bQ2jl3wPEeDj5JE/iwHtLVuxGV/Xi2hiengRvTQ+XTDEkfVo0s4L" as="fetch" type="application/wasm"></head>
+<body>
+  <canvas id="periphery"></canvas>
+  <div id="loading">Loading Periphery…</div>
+  <noscript>Periphery needs JavaScript and a Chromium-based browser (Chrome, Edge, Opera).</noscript>
+</body>
+</html>
