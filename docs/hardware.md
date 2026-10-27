@@ -18,6 +18,8 @@ know it.
 |---|---|---|---|---|---|
 | Scyrox | Mouse with PAW3950 (cid 62) | 8K receiver (`3554:F5F7`) | ✅ | ✅ | Receiver fw v2.16, mouse fw v2.20 |
 | Scyrox | Other Scyrox mice (PIDs `F5F4`, `F517`, `F5F6`, `F515`) | Receiver or wired | 🟡 | 🟡 | Same protocol; PAW3955 DPI encoding untested |
+| Dark Project | Nexus Ultra (PAW3950, cid 63) | Wired (`3554:FB05`) | ✅ | ✅ | Mouse fw v2.17. Scyrox protocol; reading confirmed on desktop and web, writing confirmed for DPI only (see below) |
+| Dark Project | Nexus Ultra | 8K receiver (`3554:FB07`) | 🟡 | 🟡 | Same protocol per the vendor app; not tested |
 | Keychron | K2 HE ANSI RGB (`3434:0E20`) | USB | ✅ | ✅ | Firmware 1.2.1, Hall-effect command version 4 |
 | Keychron | Other Keychron boards | USB / 2.4 GHz / Bluetooth | 🟡 | 🟡 | Layout downloaded from the Keychron launcher |
 | QMK/VIA | Any VIA-enabled keyboard | USB | 🟡 | 🟡 | Needs a layout definition file for the keymap |
@@ -44,6 +46,22 @@ know it.
 | Receiver pairing | ✅ |
 | Factory reset | ✅ |
 | Backup / restore | ✅ |
+
+### Dark Project Nexus Ultra (Scyrox protocol)
+
+Tested wired, mouse firmware v2.17. Writes not confirmed on this mouse say
+so in their help text.
+
+| Feature | Status |
+|---|---|
+| Firmware, battery, connection | ✅ |
+| Reading every setting (desktop and web) | ✅ |
+| Backup / restore | ✅ |
+| DPI stage values | ✅ (steps of 100 above 26000 DPI: 🟡) |
+| Writing anything else: polling rate, stages, colours, sensor options, buttons, sleep, profiles | 🟡 |
+| Factory reset | 🟡 |
+| 8K receiver: pairing, long-range mode | 🟡 |
+| 20K FPS scanning, receiver firmware | ❌ (not in the vendor app) |
 
 ### Keychron and QMK/VIA keyboards
 

@@ -13,7 +13,7 @@ use periphery_core::{
 use config::{ANGLE_TUNE_RANGE, Change, KEY_NAMES, MAX_DEBOUNCE, PROFILES, REPORT_RATES, SLEEP_OPTIONS, STAGES};
 use device::Mouse;
 use keys::{HidKey, KEY_TABLE, MEDIA_TABLE, MOUSE_BUTTONS};
-use protocol::{FIRE_INTERVAL, FIRE_TIMES, KeyAction, Macro, MacroEvent, Sensor, Shortcut, cycle, pair};
+use protocol::{DpiFormat, FIRE_INTERVAL, FIRE_TIMES, KeyAction, Macro, MacroEvent, Sensor, Shortcut, cycle, pair};
 
 pub struct ScyroxDriver;
 
@@ -65,7 +65,7 @@ impl ScyroxDevice {
             mouse.product.clone()
         };
         let info = DeviceInfo {
-            brand: "Scyrox".into(),
+            brand: mouse.model().brand.into(),
             model,
             kind: DeviceKind::Mouse,
             vid: protocol::VENDOR_ID,
@@ -107,7 +107,7 @@ impl ScyroxDevice {
             "rate" => Change::ReportRate(value.int()? as u32),
             "stages" => Change::StageCount(small(value)?),
             "stage" => Change::CurrentStage(small(value)?),
-            "dpi" => Change::Dpi(idx()?, snap_dpi(self.mouse.sensor(), value.int()? as u32)),
+            "dpi" => Change::Dpi(idx()?, snap_dpi(self.mouse.dpi_format(), value.int()? as u32)),
             "color" => Change::DpiColor(idx()?, value.color()?),
             "lod" => Change::Lod(small(value)?),
             "debounce" => Change::Debounce(small(value)?),
@@ -271,16 +271,63 @@ mod tests {
         let text = events_to_text(&events);
         assert_eq!(parse_events(&text).unwrap(), events);
     }
+
+    #[test]
+    fn snap_dpi_respects_the_doubled_range() {
+        let scyrox = Sensor::Paw3950.dpi_format();
+        assert_eq!(snap_dpi(scyrox, 26060), 26050);
+        assert_eq!(snap_dpi(scyrox, 30080), 30000);
+        let dark_project = DpiFormat { single_max: 26000, ..scyrox };
+        for (asked, snapped) in [(25990, 26000), (26040, 26000), (26060, 26100), (26149, 26100), (31000, 30000)] {
+            assert_eq!(snap_dpi(dark_project, asked), snapped, "{asked}");
+            dark_project.validate(snapped).unwrap();
+        }
+    }
+
+    #[test]
+    fn untested_writes_are_noted() {
+        let mut g = Group::new("DPI");
+        g.push(Setting::new("dpi.0", "Stage 1 DPI", Kind::range(50, 30000), Value::Int(800)));
+        g.push(Setting::toggle("ripple", "Ripple control", false));
+        g.push(Setting::toggle("angle_snap", "Angle snapping", false).help("Straightens slightly diagonal movements"));
+        g.push(Setting::new("firmware", "Firmware", Kind::Info, Value::Unit));
+        let mut groups = [g];
+        mark_untested(&mut groups, &["dpi."]);
+        let help: Vec<_> = groups[0].settings.iter().map(|s| s.help.as_deref()).collect();
+        assert_eq!(help, [
+            None,
+            Some(UNTESTED),
+            Some("Straightens slightly diagonal movements. Not tested on this model yet"),
+            None,
+        ]);
+    }
+}
+
+const UNTESTED: &str = "Not tested on this model yet";
+
+/// Notes in the help text which settings haven't been written on this model.
+fn mark_untested(groups: &mut [Group], tested: &[&str]) {
+    for s in groups.iter_mut().flat_map(|g| &mut g.settings) {
+        if matches!(s.kind, Kind::Info) || tested.iter().any(|t| s.id.starts_with(t)) {
+            continue;
+        }
+        s.help = Some(match s.help.take() {
+            Some(h) => format!("{h}. {UNTESTED}"),
+            None => UNTESTED.into(),
+        });
+    }
 }
 
 /// Rounds to the nearest DPI the sensor can represent.
-fn snap_dpi(sensor: Sensor, dpi: u32) -> u32 {
-    let step = match sensor {
-        Sensor::Paw3950 => 50,
-        Sensor::Paw3955 if dpi > 42000 => 2,
-        Sensor::Paw3955 => 1,
+fn snap_dpi(format: DpiFormat, dpi: u32) -> u32 {
+    let round = |step: u32| (dpi + step / 2) / step * step;
+    let snapped = match format.sensor {
+        Sensor::Paw3950 if round(50) > format.single_max => round(100),
+        Sensor::Paw3950 => round(50),
+        Sensor::Paw3955 if dpi > 42000 => round(2),
+        Sensor::Paw3955 => round(1),
     };
-    ((dpi + step / 2) / step * step).clamp(step, sensor.max_dpi())
+    snapped.clamp(format.step_at(0), format.sensor.max_dpi())
 }
 
 fn fmt_secs(secs: u32) -> String {
@@ -369,14 +416,20 @@ impl Device for ScyroxDevice {
         out.groups.push(perf);
 
         let mut dpi = Group::new("DPI");
-        let step = if snap.sensor == Sensor::Paw3950 { 50 } else { 1 };
+        let format = self.mouse.dpi_format();
+        let step = format.step_at(0);
+        let max = snap.sensor.max_dpi();
         for i in 0..s.stage_count as usize {
-            dpi.push_as(Role::Dpi(i as u8), Setting::new(
+            let mut setting = Setting::new(
                 format!("dpi.{i}"),
                 format!("Stage {} DPI", i + 1),
-                Kind::range_unit(step, snap.sensor.max_dpi() as i64, step, 1.0, " DPI"),
+                Kind::range_unit(step as i64, max as i64, step as i64, 1.0, " DPI"),
                 Value::Int(s.dpis[i].0 as i64),
-            ));
+            );
+            if format.single_max < max {
+                setting = setting.help(format!("Above {} DPI, steps of {}", format.single_max, format.step_at(max)));
+            }
+            dpi.push_as(Role::Dpi(i as u8), setting);
             dpi.push_as(Role::StageColor(i as u8), Setting::new(
                 format!("color.{i}"),
                 format!("Stage {} colour", i + 1),
@@ -535,6 +588,9 @@ impl Device for ScyroxDevice {
         power.push_as(Role::FactoryReset, Setting::action("reset", "Factory reset", Some("Reset every setting to factory defaults?")));
         out.groups.push(power);
 
+        if let Some(tested) = self.mouse.model().tested_writes {
+            mark_untested(&mut out.groups, tested);
+        }
         self.last = Some(snap);
         Ok(out)
     }

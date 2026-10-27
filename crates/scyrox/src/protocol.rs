@@ -1,5 +1,6 @@
 //! Wire protocol of the Scyrox web driver (www.scyrox.net), recovered from its
-//! WebHID bundle. Every exchange is a 16-byte report with report ID 8:
+//! WebHID bundle. Other Compx-based mice speak it too (see [`MODELS`]). Every
+//! exchange is a 16-byte report with report ID 8:
 //!
 //! ```text
 //! [cmd, status, addr_hi, addr_lo, len, data[0..10], checksum]
@@ -11,8 +12,74 @@
 use crate::keys::HidKey;
 
 pub const VENDOR_ID: u16 = 0x3554;
-/// Wireless dongles, then wired mice (cfg.json "pid.mouse").
-pub const PRODUCT_IDS: &[u16] = &[0xF5F4, 0xF5F7, 0xF517, 0xF5F6, 0xF515];
+/// Wireless dongles, then wired mice (cfg.json "pid.mouse"), then the
+/// [`MODELS`] of other brands.
+pub const PRODUCT_IDS: &[u16] = &[0xF5F4, 0xF5F7, 0xF517, 0xF5F6, 0xF515, 0xFB05, 0xFB07];
+
+/// What differs between products that share this protocol. Scyrox mice use
+/// [`Model::SCYROX`]; other brands are listed in [`MODELS`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Model {
+    pub product_id: u16,
+    pub brand: &'static str,
+    /// Highest DPI stored without the doubled multiplier; `None` keeps the
+    /// sensor's default (see [`Sensor::dpi_format`]).
+    pub dpi_single_max: Option<u32>,
+    /// Whether the firmware is known to answer [`cmd::GET_DONGLE_VERSION`].
+    pub dongle_version: bool,
+    /// Whether the "20K" switch at [`addr::SCAN_20K`] exists.
+    pub scan_20k: bool,
+    /// The collection carrying the protocol, when known; otherwise every
+    /// collection is tried, vendor pages first.
+    pub usage_page: Option<u16>,
+    /// Setting ids (prefixes) whose writes were confirmed on this model;
+    /// `None` when the model needs no note.
+    pub tested_writes: Option<&'static [&'static str]>,
+}
+
+impl Model {
+    pub const SCYROX: Model = Model {
+        product_id: 0,
+        brand: "Scyrox",
+        dpi_single_max: None,
+        dongle_version: true,
+        scan_20k: true,
+        usage_page: None,
+        tested_writes: None,
+    };
+
+    pub fn for_product(product_id: u16) -> Model {
+        MODELS.iter().copied().find(|m| m.product_id == product_id).unwrap_or(Model::SCYROX)
+    }
+}
+
+/// Dark Project Nexus Ultra, from its desktop app (v1.0.1.1, 2024-10-08):
+/// `usersetting/Config.ini` gives the ids (`USB_PID`, `Wireless8_PID`, cid 63,
+/// mid 2) and `DPIRange=50, 26000, 50, 26100, 30000, 100, 0x11`. Its
+/// `HIDUsb.dll` builds the same packets, flash map and commands as scyrox.net,
+/// but never sends [`cmd::GET_DONGLE_VERSION`], and the app has no 20K switch.
+/// The wired mouse answers on usage page `0xFF02`.
+pub const MODELS: &[Model] = &[
+    Model {
+        product_id: 0xFB05,
+        brand: "Dark Project",
+        dpi_single_max: Some(26000),
+        dongle_version: false,
+        scan_20k: false,
+        usage_page: Some(0xFF02),
+        tested_writes: Some(&["dpi."]),
+    },
+    // 8K receiver: not tested on hardware.
+    Model {
+        product_id: 0xFB07,
+        brand: "Dark Project",
+        dpi_single_max: Some(26000),
+        dongle_version: false,
+        scan_20k: false,
+        usage_page: None,
+        tested_writes: Some(&[]),
+    },
+];
 pub const REPORT_ID: u8 = 8;
 pub const PACKET_LEN: usize = 16;
 pub const CHUNK: usize = 10;
@@ -147,44 +214,18 @@ impl Sensor {
         }
     }
 
-    pub fn validate_dpi(self, dpi: u32) -> Result<(), String> {
+    /// The DPI ranges scyrox.net uses for this sensor.
+    pub fn dpi_format(self) -> DpiFormat {
         let (step, hi_min) = self.ranges();
-        let step = if dpi >= hi_min { step * 2 } else { step };
-        if dpi < step || dpi > self.max_dpi() || dpi % step != 0 {
-            return Err(format!(
-                "{dpi} DPI is not valid for {self:?} (multiples of {step}, max {})",
-                self.max_dpi()
-            ));
-        }
-        Ok(())
+        DpiFormat { sensor: self, single_max: hi_min - step }
     }
 
-    /// Flash block for one DPI stage, X and Y set to the same value (`E0` +
-    /// `Set_MS_DPIValue` in the bundle). Flag byte layout:
-    /// bits 0-1 X multiplier, 2-3 X high bits, 4-5 Y multiplier, 6-7 Y high bits.
+    pub fn validate_dpi(self, dpi: u32) -> Result<(), String> {
+        self.dpi_format().validate(dpi)
+    }
+
     pub fn encode_dpi(self, dpi: u32) -> Vec<u8> {
-        let (step, hi_min) = self.ranges();
-        let (doubled, mult) = if dpi >= hi_min { (true, 2) } else { (false, 1) };
-        let raw = dpi / mult / step - 1;
-        let ex = if doubled { 0x11u8 } else { 0 };
-        let mut out = match self {
-            Sensor::Paw3950 => {
-                let hi = ((raw >> 8) & 3) as u8;
-                vec![raw as u8, raw as u8, (hi << 2) | (hi << 6) | ex]
-            }
-            Sensor::Paw3955 => {
-                let hi = ((raw >> 16) & 3) as u8;
-                vec![
-                    raw as u8,
-                    (raw >> 8) as u8,
-                    raw as u8,
-                    (raw >> 8) as u8,
-                    (hi << 2) | (hi << 6) | ex,
-                ]
-            }
-        };
-        out.push(data_checksum(&out));
-        out
+        self.dpi_format().encode(dpi)
     }
 
     /// Returns (x, y) DPI for a stage block read from flash (`Update_Mouse_Dpi`).
@@ -214,6 +255,63 @@ impl Sensor {
                 (value(x, f & 3), value(y, (f >> 4) & 3))
             }
         }
+    }
+}
+
+/// How DPI values are stored: values above `single_max` use the doubled
+/// multiplier and twice the sensor's step. The threshold is the vendor's
+/// choice (scyrox.net: from 30100 on a PAW3950; Dark Project: above 26000).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DpiFormat {
+    pub sensor: Sensor,
+    pub single_max: u32,
+}
+
+impl DpiFormat {
+    /// Valid DPI values are multiples of this step.
+    pub fn step_at(self, dpi: u32) -> u32 {
+        let (step, _) = self.sensor.ranges();
+        if dpi > self.single_max { step * 2 } else { step }
+    }
+
+    pub fn validate(self, dpi: u32) -> Result<(), String> {
+        let step = self.step_at(dpi);
+        let max = self.sensor.max_dpi();
+        if dpi < step || dpi > max || dpi % step != 0 {
+            return Err(format!(
+                "{dpi} DPI is not valid for {:?} (multiples of {step}, max {max})",
+                self.sensor
+            ));
+        }
+        Ok(())
+    }
+
+    /// Flash block for one DPI stage, X and Y set to the same value (`E0` +
+    /// `Set_MS_DPIValue` in the bundle). Flag byte layout:
+    /// bits 0-1 X multiplier, 2-3 X high bits, 4-5 Y multiplier, 6-7 Y high bits.
+    pub fn encode(self, dpi: u32) -> Vec<u8> {
+        let (step, _) = self.sensor.ranges();
+        let (doubled, mult) = if dpi > self.single_max { (true, 2) } else { (false, 1) };
+        let raw = dpi / mult / step - 1;
+        let ex = if doubled { 0x11u8 } else { 0 };
+        let mut out = match self.sensor {
+            Sensor::Paw3950 => {
+                let hi = ((raw >> 8) & 3) as u8;
+                vec![raw as u8, raw as u8, (hi << 2) | (hi << 6) | ex]
+            }
+            Sensor::Paw3955 => {
+                let hi = ((raw >> 16) & 3) as u8;
+                vec![
+                    raw as u8,
+                    (raw >> 8) as u8,
+                    raw as u8,
+                    (raw >> 8) as u8,
+                    (hi << 2) | (hi << 6) | ex,
+                ]
+            }
+        };
+        out.push(data_checksum(&out));
+        out
     }
 }
 
@@ -570,6 +668,60 @@ mod tests {
         }
         assert!(Sensor::Paw3950.validate_dpi(825).is_err());
         assert!(Sensor::Paw3950.validate_dpi(40000).is_err());
+    }
+
+    #[test]
+    fn models() {
+        assert_eq!(Model::for_product(0xF5F7), Model::SCYROX);
+        for pid in [0xFB05, 0xFB07] {
+            let m = Model::for_product(pid);
+            assert!(PRODUCT_IDS.contains(&pid));
+            assert_eq!(m.brand, "Dark Project");
+            assert!(!m.dongle_version && !m.scan_20k);
+        }
+        assert_eq!(Model::for_product(0xFB05).usage_page, Some(0xFF02));
+    }
+
+    #[test]
+    fn dark_project_dpi_doubles_above_26000() {
+        // Config.ini: DPIRange=50, 26000, 50, 26100, 30000, 100, 0x11
+        let f = DpiFormat { sensor: Sensor::Paw3950, single_max: 26000 };
+        assert_eq!(f.encode(26000), Sensor::Paw3950.encode_dpi(26000));
+        assert!(f.validate(26050).is_err());
+        for d in [26100, 28000, 30000] {
+            f.validate(d).unwrap();
+            let b = f.encode(d);
+            assert_eq!(b[2] & 0x11, 0x11, "{d} uses the doubled multiplier");
+            assert_eq!(Sensor::Paw3950.decode_dpi(&b), (d, d));
+        }
+        // 26100 = (260 + 1) * 50 * 2
+        assert_eq!(f.encode(26100), [4, 4, 0x11 | 1 << 2 | 1 << 6, data_checksum(&[4, 4, 0x11 | 1 << 2 | 1 << 6])]);
+        // scyrox.net keeps the single multiplier up to 30000.
+        assert_eq!(Sensor::Paw3950.encode_dpi(26100)[2] & 0x11, 0);
+    }
+
+    #[test]
+    fn packets_match_nexus_ultra_capture() {
+        // Requests and replies captured on a Dark Project Nexus Ultra (wired).
+        let with_id = |p: [u8; PACKET_LEN]| [&[REPORT_ID][..], &p].concat();
+        assert_eq!(with_id(packet(cmd::READ_VERSION, 0, &[]))[PACKET_LEN], 0x3b);
+        assert_eq!(with_id(packet(cmd::DEVICE_ONLINE, 0, &[]))[PACKET_LEN], 0x4a);
+        assert_eq!(
+            with_id(read_packet(0, 10)),
+            [0x08, 0x08, 0, 0, 0, 0x0a, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x3b]
+        );
+        assert_eq!(
+            with_id(packet(cmd::ENCRYPTION_DATA, 0, &[0xe8, 0xe5, 0xb4, 0x1d, 0, 0, 0, 0])),
+            [0x08, 0x01, 0, 0, 0, 0x08, 0xe8, 0xe5, 0xb4, 0x1d, 0, 0, 0, 0, 0, 0, 0xa6]
+        );
+        // Every reply sums to 0x55 with its report id, like the requests.
+        for reply in [
+            [0x08u8, 0x01, 0, 0, 0, 0x08, 0x0c, 0x80, 0x39, 0x5c, 0x3f, 0x02, 0x02, 0, 0, 0, 0xe0],
+            [0x08, 0x12, 0, 0, 0, 0x02, 0x02, 0x17, 0, 0, 0, 0, 0, 0, 0, 0, 0x20],
+            [0x08, 0x04, 0, 0, 0, 0x02, 0x64, 0x01, 0x10, 0x54, 0, 0, 0, 0, 0, 0, 0x7e],
+        ] {
+            assert_eq!(reply.iter().fold(0u8, |a, b| a.wrapping_add(*b)), 0x55, "{reply:02x?}");
+        }
     }
 
     #[test]

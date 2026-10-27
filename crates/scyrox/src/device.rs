@@ -3,7 +3,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use hid_transport::{Api, Device, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::protocol::{self, CHUNK, PACKET_LEN, REPORT_ID, Sensor, cmd};
+use crate::protocol::{self, CHUNK, DpiFormat, Model, PACKET_LEN, REPORT_ID, Sensor, cmd};
 
 const REPLY_TIMEOUT: Duration = Duration::from_millis(200);
 const RETRIES: usize = 5;
@@ -55,6 +55,7 @@ impl Mouse {
             .filter(|d| {
                 d.vendor_id == protocol::VENDOR_ID
                     && protocol::PRODUCT_IDS.contains(&d.product_id)
+                    && Model::for_product(d.product_id).usage_page.is_none_or(|p| p == d.usage_page)
             })
             .collect();
         if candidates.is_empty() {
@@ -93,6 +94,18 @@ impl Mouse {
 
     pub fn sensor(&self) -> Sensor {
         Sensor::from_mid(self.info.mid)
+    }
+
+    pub fn model(&self) -> Model {
+        Model::for_product(self.product_id)
+    }
+
+    pub fn dpi_format(&self) -> DpiFormat {
+        let default = self.sensor().dpi_format();
+        match self.model().dpi_single_max {
+            Some(single_max) => DpiFormat { single_max, ..default },
+            None => default,
+        }
     }
 
     async fn send(&self, p: &[u8; PACKET_LEN]) -> Result<()> {

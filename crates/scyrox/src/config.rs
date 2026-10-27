@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 
 use crate::device::{Info, Mouse};
 use crate::protocol::{
-    self, CHUNK, FIRE_INTERVAL, FIRE_TIMES, KeyAction, Macro, Sensor, Shortcut, addr,
+    self, CHUNK, FIRE_INTERVAL, FIRE_TIMES, KeyAction, Macro, Model, Sensor, Shortcut, addr,
     decode_report_rate, pair_valid,
 };
 
@@ -183,6 +183,22 @@ impl Mouse {
             Sensor::Paw3950 => f[addr::DPI_VALUE as usize..][..32].to_vec(),
             Sensor::Paw3955 => self.read_flash(addr::SENSOR_3955_DPI, 48).await?,
         };
+        let mut s = Settings::from_flash(&f, &dpi_blocks, sensor, self.model());
+        for k in 0..KEYS {
+            match s.keys[k as usize] {
+                KeyAction::Shortcut => s.shortcuts[k as usize] = self.read_shortcut(k).await?,
+                KeyAction::Macro { .. } => s.macros[k as usize] = self.read_macro(k).await?,
+                _ => {}
+            }
+        }
+        Ok(s)
+    }
+}
+
+impl Settings {
+    /// Decodes the first 256 flash bytes. `dpi_blocks` holds the 8 stage
+    /// blocks ([`Sensor::dpi_addr`]); combo keys and macros are left empty.
+    pub fn from_flash(f: &[u8], dpi_blocks: &[u8], sensor: Sensor, model: Model) -> Settings {
         let block = dpi_blocks.len() / STAGES as usize;
         let at = |a: u16| f[a as usize];
         let opt = |a: u16| pair_valid(at(a), at(a + 1)).then(|| at(a));
@@ -192,16 +208,7 @@ impl Mouse {
                 KeyAction::decode(b[0], u16::from_be_bytes([b[1], b[2]]))
             })
             .collect();
-        let mut shortcuts = vec![None; KEYS as usize];
-        let mut macros = vec![None; KEYS as usize];
-        for (k, a) in keys.iter().enumerate() {
-            match a {
-                KeyAction::Shortcut => shortcuts[k] = self.read_shortcut(k as u8).await?,
-                KeyAction::Macro { .. } => macros[k] = self.read_macro(k as u8).await?,
-                _ => {}
-            }
-        }
-        Ok(Settings {
+        Settings {
             report_rate: decode_report_rate(at(addr::REPORT_RATE)),
             stage_count: at(addr::DPI_STAGE_COUNT).clamp(1, STAGES),
             current_stage: at(addr::CURRENT_DPI).min(STAGES - 1),
@@ -217,20 +224,22 @@ impl Mouse {
             angle_snap: at(addr::ANGLE_SNAP) == 1,
             ripple: at(addr::RIPPLE) == 1,
             competition: opt(addr::COMPETITION).map(|v| v == 1),
-            scan_20k: opt(addr::SCAN_20K).map(|v| v == 1),
+            scan_20k: opt(addr::SCAN_20K).filter(|_| model.scan_20k).map(|v| v == 1),
             angle_tune: opt(addr::ANGLE_TUNE_STATE)
                 .and(opt(addr::ANGLE_TUNE))
                 .map(|v| v as i8),
             sleep_secs: at(addr::SLEEP_TIME) as u32 * 10,
             keys,
-            shortcuts,
-            macros,
+            shortcuts: vec![None; KEYS as usize],
+            macros: vec![None; KEYS as usize],
             sensor_mode: at(addr::SENSOR_MODE),
             release_debounce: opt(addr::DEBOUNCE_RELEASE),
             wheel_debounce: opt(addr::WHEEL_DEBOUNCE),
-        })
+        }
     }
+}
 
+impl Mouse {
     pub async fn snapshot(&self) -> Result<Snapshot> {
         let mouse = if self.online().await? {
             Some(Online {
@@ -248,7 +257,7 @@ impl Mouse {
             product_id: self.product_id,
             info: self.info,
             sensor: self.sensor(),
-            dongle_version: self.dongle_version().await?,
+            dongle_version: if self.model().dongle_version { self.dongle_version().await? } else { None },
             mouse,
         })
     }
@@ -279,8 +288,9 @@ impl Mouse {
                 self.write_setting(addr::REPORT_RATE, v).await
             }
             &Change::Dpi(s, dpi) => {
-                sensor.validate_dpi(dpi).map_err(anyhow::Error::msg)?;
-                self.write_flash(sensor.dpi_addr(stage(s)?), &sensor.encode_dpi(dpi)).await
+                let format = self.dpi_format();
+                format.validate(dpi).map_err(anyhow::Error::msg)?;
+                self.write_flash(sensor.dpi_addr(stage(s)?), &format.encode(dpi)).await
             }
             &Change::StageCount(n) => {
                 if !(1..=STAGES).contains(&n) {
@@ -306,7 +316,12 @@ impl Mouse {
             &Change::AngleSnap(on) => self.write_setting(addr::ANGLE_SNAP, on as u8).await,
             &Change::Ripple(on) => self.write_setting(addr::RIPPLE, on as u8).await,
             &Change::Competition(on) => self.write_setting(addr::COMPETITION, on as u8).await,
-            &Change::Scan20k(on) => self.write_setting(addr::SCAN_20K, on as u8).await,
+            &Change::Scan20k(on) => {
+                if !self.model().scan_20k {
+                    bail!("this mouse has no 20K switch");
+                }
+                self.write_setting(addr::SCAN_20K, on as u8).await
+            }
             &Change::SensorMode(m) => {
                 if m > 1 {
                     bail!("sensor mode must be LP (0) or HP (1)");
@@ -422,6 +437,87 @@ impl Mouse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Flash 0..256 read from a Dark Project Nexus Ultra (3554:FB05, wired,
+    /// firmware v2.17, cid 63, mid 2).
+    const NEXUS_ULTRA_FLASH: [u8; 256] = [
+        0x01, 0x54, 0x02, 0x53, 0x00, 0x55, 0x00, 0x55, 0x00, 0x55, 0x01, 0x54, 0x0f, 0x0f, 0x00, 0x37,
+        0x1f, 0x1f, 0x00, 0x17, 0x1f, 0x1f, 0x00, 0x17, 0x2f, 0x2f, 0x00, 0xf7, 0x3f, 0x3f, 0x00, 0xd7,
+        0x7f, 0x7f, 0x00, 0x57, 0x7f, 0x7f, 0x00, 0x57, 0x7f, 0x7f, 0x00, 0x57, 0x00, 0x00, 0x00, 0x55,
+        0xff, 0xff, 0xff, 0x58, 0x00, 0xff, 0x00, 0x56, 0xff, 0xff, 0x00, 0x57, 0x00, 0xff, 0xff, 0x57,
+        0xff, 0x00, 0xff, 0x57, 0x00, 0xff, 0xff, 0x57, 0xff, 0xff, 0xff, 0x58, 0x01, 0x54, 0x80, 0xd5,
+        0x03, 0x52, 0x00, 0x55, 0xff, 0x00, 0xff, 0x57, 0x00, 0x55, 0x80, 0xd5, 0x03, 0x52, 0x00, 0x55,
+        0x01, 0x01, 0x00, 0x53, 0x01, 0x02, 0x00, 0x52, 0x01, 0x04, 0x00, 0x50, 0x01, 0x08, 0x00, 0x4c,
+        0x01, 0x10, 0x00, 0x44, 0x02, 0x01, 0x00, 0x52, 0x02, 0x02, 0x00, 0x51, 0x02, 0x03, 0x00, 0x50,
+        0x07, 0x00, 0x00, 0x4e, 0x08, 0x04, 0x00, 0x49, 0x04, 0x0a, 0x03, 0x44, 0x00, 0x00, 0x00, 0x55,
+        0x00, 0x00, 0x00, 0x55, 0x00, 0x00, 0x00, 0x55, 0x00, 0x00, 0x00, 0x55, 0x00, 0x00, 0x00, 0x55,
+        0x01, 0xff, 0x00, 0xff, 0x07, 0x09, 0x46, 0x00, 0x55, 0x04, 0x51, 0x00, 0x55, 0x06, 0x4f, 0x00,
+        0x55, 0x00, 0x55, 0x00, 0x55, 0x00, 0x55, 0x06, 0x4f, 0x00, 0x55, 0x0a, 0x4b, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    ];
+
+    fn nexus_ultra() -> (Settings, Model) {
+        let f = &NEXUS_ULTRA_FLASH;
+        let model = Model::for_product(0xFB05);
+        (Settings::from_flash(f, &f[addr::DPI_VALUE as usize..][..32], Sensor::from_mid(2), model), model)
+    }
+
+    #[test]
+    fn decodes_nexus_ultra_flash() {
+        let (s, _) = nexus_ultra();
+        assert_eq!(s.report_rate, 1000);
+        assert_eq!((s.stage_count, s.current_stage), (2, 0));
+        let dpis: Vec<u32> = s.dpis.iter().map(|d| d.0).collect();
+        assert_eq!(dpis, [800, 1600, 1600, 2400, 3200, 6400, 6400, 6400]);
+        assert!(s.dpis.iter().all(|(x, y)| x == y));
+        assert_eq!(&s.colors[..2], &[[0, 0, 0], [0xff, 0xff, 0xff]]);
+        assert_eq!((s.lod, s.debounce, s.sleep_secs), (1, 4, 60));
+        assert_eq!((s.motion_sync, s.angle_snap, s.ripple), (false, false, false));
+        assert_eq!(s.competition, Some(false));
+        assert_eq!(s.sensor_mode, 0);
+        assert_eq!(
+            s.keys,
+            [KeyAction::Left, KeyAction::Right, KeyAction::Middle, KeyAction::Back, KeyAction::Forward, KeyAction::DpiLoop]
+        );
+        // Not offered by the Dark Project app; the flash has no valid pair for these.
+        assert_eq!((s.angle_tune, s.release_debounce, s.wheel_debounce), (None, None, None));
+        // Address 8 holds a valid pair, but this model has no 20K switch.
+        assert_eq!(s.scan_20k, None);
+        let as_scyrox = Settings::from_flash(&NEXUS_ULTRA_FLASH, &NEXUS_ULTRA_FLASH[12..44], Sensor::Paw3950, Model::SCYROX);
+        assert_eq!(as_scyrox.scan_20k, Some(false));
+    }
+
+    #[test]
+    fn nexus_ultra_flash_roundtrip() {
+        let (s, _) = nexus_ultra();
+        let f = &NEXUS_ULTRA_FLASH;
+        let pair = |a: u16| [f[a as usize], f[a as usize + 1]];
+        let encode = |v: u8| [v, 0x55u8.wrapping_sub(v)];
+        assert_eq!(pair(addr::REPORT_RATE), encode(protocol::encode_report_rate(s.report_rate).unwrap()));
+        assert_eq!(pair(addr::DPI_STAGE_COUNT), encode(s.stage_count));
+        assert_eq!(pair(addr::CURRENT_DPI), encode(s.current_stage));
+        assert_eq!(pair(addr::LOD), encode(s.lod));
+        assert_eq!(pair(addr::DEBOUNCE), encode(s.debounce));
+        assert_eq!(pair(addr::SLEEP_TIME), encode((s.sleep_secs / 10) as u8));
+        // SleepSecs writes the same value to PERFORMANCE; the mouse holds it there too.
+        assert_eq!(pair(addr::PERFORMANCE), encode((s.sleep_secs / 10) as u8));
+        let format = Sensor::Paw3950.dpi_format();
+        for (i, (dpi, _)) in s.dpis.iter().enumerate() {
+            let at = addr::DPI_VALUE as usize + i * 4;
+            assert_eq!(format.encode(*dpi), f[at..at + 4], "stage {i}");
+        }
+        for (i, [r, g, b]) in s.colors.iter().enumerate() {
+            let at = addr::DPI_COLOR as usize + i * 4;
+            assert_eq!([*r, *g, *b, protocol::data_checksum(&[*r, *g, *b])], f[at..at + 4], "colour {i}");
+        }
+        for (k, a) in s.keys.iter().enumerate() {
+            let at = addr::KEY_FUNCTION as usize + k * 4;
+            assert_eq!(a.flash_block(k as u8), f[at..at + 4], "button {k}");
+        }
+    }
 
     #[test]
     fn combo_presets_parse() {

@@ -9,7 +9,9 @@ its settings as data and the GUI/CLI render whatever a device reports.
 Currently supported:
 
 - **Scyrox** mice: DPI stages, polling rate, sensor options, buttons (incl. fire,
-  combo, media keys, macros), profiles, sleep, pairing.
+  combo, media keys, macros), profiles, sleep, pairing. The same driver handles
+  the **Dark Project Nexus Ultra** (tested wired: reading every setting and
+  changing DPI; other changes not yet tested on it).
 - **Logitech** HID++ 2.0 mice (tested: PRO X Superlight and Superlight 2):
   battery, onboard/software mode, live DPI and polling rate, onboard profile
   editing (DPI stages, polling rate, buttons, name, reset to factory).
@@ -41,7 +43,7 @@ Device not supported? Periphery lists it under "Not supported yet" with a
 
 | Crate | Kind | Purpose |
 |---|---|---|
-| [`scyrox`](crates/scyrox) | library | Scyrox mouse protocol (HID transport, flash map, encodings). No Periphery dependency. |
+| [`scyrox`](crates/scyrox) | library | Scyrox mouse protocol (HID transport, flash map, encodings), also used by the Dark Project Nexus Ultra. No Periphery dependency. |
 | [`qmk-via`](crates/qmk-via) | library | QMK/VIA raw-HID protocol, keycodes, layout definitions, macros, menus, and Keychron extensions. No Periphery dependency. |
 | [`logitech-hidpp`](crates/logitech-hidpp) | library | Logitech HID++ 2.0: feature discovery, battery, DPI, report rate, onboard profiles (format + CRC). No Periphery dependency. |
 | [`rongyuan`](crates/rongyuan) | library | Rongyuan firmware protocol (feature-report transport, receiver relay, PAN1080 mouse commands, Ajazz model list). No Periphery dependency. |

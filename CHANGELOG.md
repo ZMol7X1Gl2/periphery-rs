@@ -10,6 +10,14 @@ release workflow turns Unreleased into the new version.
 
 ## [Unreleased]
 
+### Added
+
+- Dark Project Nexus Ultra mouse, wired or through its 8K receiver: DPI
+  stages and colours, polling rate, sensor options, buttons, sleep,
+  profiles, backup and restore. Tested wired (firmware v2.17): reading every
+  setting and changing DPI. The other settings say "Not tested on this model
+  yet" in their help text; the receiver is untested.
+
 ## [0.4.0] - 2026-10-22
 
 ### Added
